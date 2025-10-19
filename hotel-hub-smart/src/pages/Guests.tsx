@@ -7,23 +7,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { mockGuests, mockRooms, mockBookings, Guest, Room, RoomType } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
 import { Search, Plus, Mail, Phone, Edit, Trash2, Eye, User, Calendar, Bed } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import guestService from "@/services/guestService";
+import roomService from "@/services/roomService";
+import bookingService from "@/services/bookingService";
+
+type RoomType = 'single' | 'double' | 'suite' | 'deluxe';
 
 const Guests = () => {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
-  const [guests, setGuests] = useState<Guest[]>(mockGuests);
-  const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
+  const [guests, setGuests] = useState<any[]>([]);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'checked-in' | 'checked-out'>("all");
-  const [rooms, setRooms] = useState<Room[]>(mockRooms);
   const [isCreateRoomDialogOpen, setIsCreateRoomDialogOpen] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -37,9 +43,6 @@ const Guests = () => {
     emergencyContactName: "",
     emergencyContactPhone: "",
     emergencyContactRelationship: "",
-    checkIn: "",
-    checkOut: "",
-    roomId: "",
   });
 
   const [roomFormData, setRoomFormData] = useState({
@@ -50,74 +53,118 @@ const Guests = () => {
     capacity: "",
   });
 
-  // Moved above filteredGuests to avoid reference error
-  const getGuestStatus = (guest: Guest) => {
+  // Load data on component mount
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [guestsData, roomsData, bookingsData] = await Promise.all([
+        guestService.getTransformedGuests(),
+        roomService.getTransformedRooms(),
+        bookingService.getAllBookings()
+      ]);
+      
+      setGuests(guestsData);
+      setRooms(roomsData);
+      setBookings(bookingsData.map(booking => bookingService.transformBooking(booking)));
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast.error('Failed to load guest data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get guest status based on bookings
+  const getGuestStatus = (guest: any) => {
+    const guestBooking = bookings.find(booking => 
+      booking.guestDetails?.email === guest.email || booking.guestId === guest.id
+    );
+    if (!guestBooking) return "no-booking";
     const today = new Date();
-    const checkIn = new Date(guest.checkIn);
-    const checkOut = new Date(guest.checkOut);
-    
+    const checkIn = new Date(guestBooking.checkIn);
+    if (guestBooking.status === 'checked_in') return "checked_in";
+    if (guestBooking.status === 'checked_out') return "checked_out";
     if (today < checkIn) return "upcoming";
-    if (today >= checkIn && today <= checkOut) return "checked-in";
-    return "checked-out";
+    return "checked_out";
   };
 
   const filteredGuests = guests.filter((guest) => {
+    const guestName = guest.name || `${guest.firstName} ${guest.lastName}`;
+    const idNumber = guest.idNumber || guest.identificationNumber || '';
+    
     const matchesSearch =
-      guest.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      guestName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       guest.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       guest.phone.includes(searchTerm) ||
-      guest.idNumber.includes(searchTerm);
+      idNumber.includes(searchTerm);
     const status = getGuestStatus(guest);
     const matchesStatus = statusFilter === "all" || status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const handleAddGuest = () => {
-    if (!formData.name || !formData.email || !formData.phone || !formData.idNumber || !formData.checkIn || !formData.checkOut || !formData.roomId) {
+  const handleAddGuest = async () => {
+    if (!formData.name || !formData.email || !formData.phone || !formData.idNumber) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const [firstName, ...rest] = formData.name.trim().split(" ");
-    const lastName = rest.join(" ") || firstName;
+    try {
+      const [firstName, ...rest] = formData.name.trim().split(" ");
+      const lastName = rest.join(" ") || firstName;
 
-    const newGuest: Guest = {
-      id: Date.now().toString(),
-      firstName,
-      lastName,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      idNumber: formData.idNumber,
-      nationality: formData.nationality || "Unknown",
-      address: formData.address || undefined,
-      specialRequests: formData.specialRequests || undefined,
-      emergencyContact: (formData.emergencyContactName || formData.emergencyContactPhone || formData.emergencyContactRelationship)
-        ? {
-            name: formData.emergencyContactName,
-            phone: formData.emergencyContactPhone,
-            relationship: formData.emergencyContactRelationship,
-          }
-        : undefined,
-      checkIn: formData.checkIn,
-      checkOut: formData.checkOut,
-      roomId: formData.roomId,
-    };
+      const guestData = {
+        firstName,
+        lastName,
+        email: formData.email,
+        phone: formData.phone,
+        idNumber: formData.idNumber,
+        nationality: formData.nationality || undefined,
+        address: formData.address ? {
+          street: formData.address,
+          city: 'Nairobi',
+          state: 'Nairobi County',
+          country: 'Kenya',
+          zipCode: '00100'
+        } : undefined,
+        emergencyContact: (formData.emergencyContactName || formData.emergencyContactPhone || formData.emergencyContactRelationship)
+          ? {
+              name: formData.emergencyContactName,
+              phone: formData.emergencyContactPhone,
+              relationship: formData.emergencyContactRelationship,
+            }
+          : undefined,
+        specialRequests: formData.specialRequests || undefined,
+      };
 
-    setGuests([...guests, newGuest]);
-    setIsAddDialogOpen(false);
-    resetForm();
-    toast.success("Guest registered successfully!");
+      await guestService.createGuest(guestData);
+      await loadData(); // Refresh the data
+      setIsAddDialogOpen(false);
+      resetForm();
+      toast.success("Guest registered successfully!");
+    } catch (error: any) {
+      console.error('Error creating guest:', error);
+      toast.error(error.message || 'Failed to register guest');
+    }
   };
 
 
-  const handleDeleteGuest = () => {
+  const handleDeleteGuest = async () => {
     if (!selectedGuest) return;
 
-    setGuests(guests.filter(guest => guest.id !== selectedGuest.id));
-    setIsDeleteDialogOpen(false);
-    setSelectedGuest(null);
-    toast.success("Guest deleted successfully!");
+    try {
+      await guestService.deleteGuest(selectedGuest.id);
+      await loadData(); // Refresh the data
+      setIsDeleteDialogOpen(false);
+      setSelectedGuest(null);
+      toast.success("Guest deleted successfully!");
+    } catch (error: any) {
+      console.error('Error deleting guest:', error);
+      toast.error(error.message || 'Failed to delete guest');
+    }
   };
 
   const resetForm = () => {
@@ -139,82 +186,115 @@ const Guests = () => {
   };
 
 
-  const openDeleteDialog = (guest: Guest) => {
+  const openDeleteDialog = (guest: any) => {
     setSelectedGuest(guest);
     setIsDeleteDialogOpen(true);
   };
 
-  const openViewDialog = (guest: Guest) => {
+  const openViewDialog = (guest: any) => {
     setSelectedGuest(guest);
     setIsViewDialogOpen(true);
   };
 
-  const openEditDialog = (guest: Guest) => {
+  const openEditDialog = (guest: any) => {
     setSelectedGuest(guest);
     setFormData({
       name: guest.name || `${guest.firstName} ${guest.lastName}`,
       email: guest.email,
       phone: guest.phone,
-      idNumber: guest.idNumber,
+      idNumber: guest.idNumber || guest.identificationNumber,
       nationality: guest.nationality || "",
-      address: guest.address || "",
+      address: typeof guest.address === 'string' ? guest.address : guest.address?.street || "",
       specialRequests: guest.specialRequests || "",
       emergencyContactName: guest.emergencyContact?.name || "",
       emergencyContactPhone: guest.emergencyContact?.phone || "",
       emergencyContactRelationship: guest.emergencyContact?.relationship || "",
-      checkIn: guest.checkIn,
-      checkOut: guest.checkOut,
-      roomId: guest.roomId || "",
+      checkIn: "",
+      checkOut: "",
+      roomId: "",
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleEditGuest = () => {
-    if (!selectedGuest) return;
-    const [firstName, ...rest] = formData.name.trim().split(" ");
-    const lastName = rest.join(" ") || firstName;
-    const updated: Guest = {
-      ...selectedGuest,
-      firstName,
-      lastName,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      idNumber: formData.idNumber,
-      nationality: formData.nationality || "Unknown",
-      address: formData.address || undefined,
-      specialRequests: formData.specialRequests || undefined,
-      emergencyContact: (formData.emergencyContactName || formData.emergencyContactPhone || formData.emergencyContactRelationship)
-        ? {
-            name: formData.emergencyContactName,
-            phone: formData.emergencyContactPhone,
-            relationship: formData.emergencyContactRelationship,
-          }
-        : undefined,
-      checkIn: formData.checkIn,
-      checkOut: formData.checkOut,
-      roomId: formData.roomId || undefined,
-    };
-    setGuests(guests.map(g => g.id === selectedGuest.id ? updated : g));
-    setIsEditDialogOpen(false);
-    setSelectedGuest(updated);
-    toast.success("Guest updated successfully!");
+  const handleEditGuest = async () => {
+    if (!selectedGuest || !formData.name || !formData.email || !formData.phone) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    try {
+      const [firstName, ...rest] = formData.name.trim().split(" ");
+      const lastName = rest.join(" ") || firstName;
+
+      const guestData = {
+        firstName,
+        lastName,
+        email: formData.email,
+        phone: formData.phone,
+        nationality: formData.nationality || undefined,
+        address: formData.address ? {
+          street: formData.address,
+          city: 'Nairobi',
+          state: 'Nairobi County',
+          country: 'Kenya',
+          zipCode: '00100'
+        } : undefined,
+        emergencyContact: (formData.emergencyContactName || formData.emergencyContactPhone || formData.emergencyContactRelationship)
+          ? {
+              name: formData.emergencyContactName,
+              phone: formData.emergencyContactPhone,
+              relationship: formData.emergencyContactRelationship,
+            }
+          : undefined,
+        specialRequests: formData.specialRequests || undefined,
+      };
+
+      await guestService.updateGuest(selectedGuest.id, guestData);
+      await loadData(); // Refresh the data
+      setIsEditDialogOpen(false);
+      setSelectedGuest(null);
+      resetForm();
+      toast.success("Guest updated successfully!");
+    } catch (error: any) {
+      console.error('Error updating guest:', error);
+      toast.error(error.message || 'Failed to update guest');
+    }
   };
 
-  const checkInGuest = (guest: Guest) => {
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
-    const updated = { ...guest, checkIn: todayStr } as Guest;
-    setGuests(prev => prev.map(g => g.id === guest.id ? updated : g));
-    toast.success(`${guest.name} checked in`);
+  const checkInGuest = async (guest: any) => {
+    try {
+      const guestBooking = bookings.find(booking => 
+        booking.guestDetails?.email === guest.email || booking.guestId === guest.id
+      );
+      if (guestBooking) {
+        await bookingService.updateBookingStatus(guestBooking.id, 'checked_in');
+        await loadData();
+        toast.success(`${guest.name || `${guest.firstName} ${guest.lastName}`} checked in`);
+      } else {
+        toast.error('No active booking found for this guest');
+      }
+    } catch (error: any) {
+      console.error('Error checking in guest:', error);
+      toast.error(error.message || 'Failed to check in guest');
+    }
   };
 
-  const checkOutGuest = (guest: Guest) => {
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
-    const updated = { ...guest, checkOut: todayStr } as Guest;
-    setGuests(prev => prev.map(g => g.id === guest.id ? updated : g));
-    toast.success(`${guest.name} checked out`);
+  const checkOutGuest = async (guest: any) => {
+    try {
+      const guestBooking = bookings.find(booking => 
+        booking.guestDetails?.email === guest.email || booking.guestId === guest.id
+      );
+      if (guestBooking) {
+        await bookingService.updateBookingStatus(guestBooking.id, 'checked_out');
+        await loadData();
+        toast.success(`${guest.name || `${guest.firstName} ${guest.lastName}`} checked out`);
+      } else {
+        toast.error('No active booking found for this guest');
+      }
+    } catch (error: any) {
+      console.error('Error checking out guest:', error);
+      toast.error(error.message || 'Failed to check out guest');
+    }
   };
 
 
@@ -285,41 +365,6 @@ const Guests = () => {
                       placeholder="Enter ID number"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="checkIn">Check-in Date</Label>
-                      <Input
-                        id="checkIn"
-                        type="date"
-                        value={formData.checkIn}
-                        onChange={(e) => setFormData({...formData, checkIn: e.target.value})}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="checkOut">Check-out Date</Label>
-                      <Input
-                        id="checkOut"
-                        type="date"
-                        value={formData.checkOut}
-                        onChange={(e) => setFormData({...formData, checkOut: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="roomId">Room</Label>
-                    <Select value={formData.roomId} onValueChange={(value) => setFormData({...formData, roomId: value})}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select room" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {rooms.filter(room => room.status === "available").map((room) => (
-                          <SelectItem key={room.id} value={room.id}>
-                            Room {room.number} - {room.type} (KES {room.price})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                   <div className="flex gap-2 pt-4">
                     <Button onClick={handleAddGuest} className="flex-1">Register Guest</Button>
                     <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
@@ -352,8 +397,8 @@ const Guests = () => {
                   <SelectContent>
                     <SelectItem value="all">All</SelectItem>
                     <SelectItem value="upcoming">Upcoming</SelectItem>
-                    <SelectItem value="checked-in">Checked in</SelectItem>
-                    <SelectItem value="checked-out">Checked out</SelectItem>
+                    <SelectItem value="checked_in">Checked in</SelectItem>
+                    <SelectItem value="checked_out">Checked out</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -362,30 +407,77 @@ const Guests = () => {
         </Card>
 
         {/* Guest List */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {filteredGuests.map((guest) => {
-    const room = rooms.find((r) => r.id === guest.roomId);
-            const status = getGuestStatus(guest);
-            return (
-              <Card key={guest.id} className="hover:shadow-lg transition-all duration-300 animate-fade-in">
+        {loading ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {[...Array(6)].map((_, i) => (
+              <Card key={i} className="animate-pulse">
                 <CardContent className="p-6">
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="text-xl font-bold">{guest.name}</h3>
-                        <p className="text-sm text-muted-foreground">ID: {guest.idNumber}</p>
+                      <div className="space-y-2">
+                        <div className="h-6 bg-gray-200 rounded w-32"></div>
+                        <div className="h-4 bg-gray-200 rounded w-24"></div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium">Room {room?.number}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{room?.type}</p>
-                        <Badge 
-                          variant={status === "checked-in" ? "default" : status === "upcoming" ? "secondary" : "outline"}
-                          className="mt-1"
-                        >
-                          {status.replace("-", " ")}
-                        </Badge>
+                      <div className="space-y-2 text-right">
+                        <div className="h-4 bg-gray-200 rounded w-20"></div>
+                        <div className="h-3 bg-gray-200 rounded w-16"></div>
+                        <div className="h-6 bg-gray-200 rounded w-20"></div>
                       </div>
                     </div>
+                    <div className="space-y-2">
+                      <div className="h-4 bg-gray-200 rounded w-full"></div>
+                      <div className="h-4 bg-gray-200 rounded w-full"></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : filteredGuests.length === 0 ? (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium mb-2">No guests found</h3>
+              <p className="text-muted-foreground mb-4">
+                {searchTerm ? 'Try adjusting your search terms' : 'No guests have been registered yet'}
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {filteredGuests.map((guest) => {
+              const guestBooking = bookings.find(booking => 
+                booking.guestDetails?.email === guest.email || booking.guestId === guest.id
+              );
+              const room = rooms.find((r) => r.id === guestBooking?.roomId);
+              const status = getGuestStatus(guest);
+              const guestName = guest.name || `${guest.firstName} ${guest.lastName}`;
+              const idNumber = guest.idNumber || guest.identificationNumber || 'N/A';
+              
+              return (
+                <Card key={guest.id} className="hover:shadow-lg transition-all duration-300 animate-fade-in">
+                  <CardContent className="p-6">
+                    <div className="space-y-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-xl font-bold">{guestName}</h3>
+                          <p className="text-sm text-muted-foreground">ID: {idNumber}</p>
+                        </div>
+                        <div className="text-right">
+                          {room && (
+                            <>
+                              <p className="text-sm font-medium">Room {room.number}</p>
+                              <p className="text-xs text-muted-foreground capitalize">{room.type}</p>
+                            </>
+                          )}
+                          <Badge 
+                            variant={status === "checked_in" ? "default" : status === "upcoming" ? "secondary" : "outline"}
+                            className="mt-1"
+                          >
+                            {status.replace("_", " ")}
+                          </Badge>
+                        </div>
+                      </div>
 
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-sm">
@@ -398,16 +490,18 @@ const Guests = () => {
                       </div>
                     </div>
 
-                    <div className="flex justify-between pt-4 border-t">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Check-in</p>
-                        <p className="text-sm font-medium">{new Date(guest.checkIn).toLocaleDateString()}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Check-out</p>
-                        <p className="text-sm font-medium">{new Date(guest.checkOut).toLocaleDateString()}</p>
-                      </div>
-                    </div>
+                      {guestBooking && (
+                        <div className="flex justify-between pt-4 border-t">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Check-in</p>
+                            <p className="text-sm font-medium">{new Date(guestBooking.checkIn).toLocaleDateString()}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-muted-foreground">Check-out</p>
+                            <p className="text-sm font-medium">{new Date(guestBooking.checkOut).toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                      )}
 
                     <div className="flex gap-2">
                       {/* Status actions */}
@@ -452,13 +546,14 @@ const Guests = () => {
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       )}
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
 
         {/* Edit Guest Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -506,41 +601,6 @@ const Guests = () => {
                   placeholder="Enter ID number"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-checkIn">Check-in Date</Label>
-                  <Input
-                    id="edit-checkIn"
-                    type="date"
-                    value={formData.checkIn}
-                    onChange={(e) => setFormData({...formData, checkIn: e.target.value})}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-checkOut">Check-out Date</Label>
-                  <Input
-                    id="edit-checkOut"
-                    type="date"
-                    value={formData.checkOut}
-                    onChange={(e) => setFormData({...formData, checkOut: e.target.value})}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-roomId">Room</Label>
-                <Select value={formData.roomId} onValueChange={(value) => setFormData({...formData, roomId: value})}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select room" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {rooms.map((room) => (
-                      <SelectItem key={room.id} value={room.id}>
-                        Room {room.number} - {room.type} (KES {room.price})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="flex gap-2 pt-4">
                 <Button onClick={handleEditGuest} className="flex-1">Update Guest</Button>
                 <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
@@ -549,76 +609,6 @@ const Guests = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Create Room and Assign Dialog (Receptionist) */}
-        <Dialog open={isCreateRoomDialogOpen} onOpenChange={setIsCreateRoomDialogOpen}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create Room and Assign to Guest</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="room-number">Room Number</Label>
-                  <Input id="room-number" value={roomFormData.number} onChange={(e)=>setRoomFormData({...roomFormData, number: e.target.value})} placeholder="e.g., 205" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="room-floor">Floor</Label>
-                  <Input id="room-floor" type="number" value={roomFormData.floor} onChange={(e)=>setRoomFormData({...roomFormData, floor: e.target.value})} placeholder="e.g., 2" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Room Type</Label>
-                <Select value={roomFormData.type} onValueChange={(v)=>setRoomFormData({...roomFormData, type: v as RoomType})}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single">Single</SelectItem>
-                    <SelectItem value="double">Double</SelectItem>
-                    <SelectItem value="suite">Suite</SelectItem>
-                    <SelectItem value="deluxe">Deluxe</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="room-capacity">Capacity</Label>
-                  <Input id="room-capacity" type="number" value={roomFormData.capacity} onChange={(e)=>setRoomFormData({...roomFormData, capacity: e.target.value})} placeholder="e.g., 2" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="room-price">Price (KES)</Label>
-                  <Input id="room-price" type="number" value={roomFormData.price} onChange={(e)=>setRoomFormData({...roomFormData, price: e.target.value})} placeholder="e.g., 8000" />
-                </div>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Button onClick={() => {
-                  if (!roomFormData.number || !roomFormData.price || !roomFormData.floor || !roomFormData.capacity || !selectedGuest) {
-                    toast.error("Please fill all fields");
-                    return;
-                  }
-                  const newRoom: Room = {
-                    id: Date.now().toString(),
-                    number: roomFormData.number,
-                    type: roomFormData.type,
-                    status: "available",
-                    price: parseInt(roomFormData.price),
-                    floor: parseInt(roomFormData.floor),
-                    capacity: parseInt(roomFormData.capacity),
-                    amenities: [],
-                  } as any;
-                  setRooms(prev => [...prev, newRoom]);
-                  // assign to guest
-                  setGuests(prev => prev.map(g => g.id === selectedGuest.id ? { ...g, roomId: newRoom.id } : g));
-                  setSelectedGuest({ ...selectedGuest, roomId: newRoom.id });
-                  toast.success(`Room ${newRoom.number} created and assigned to ${selectedGuest.name}`);
-                  setIsCreateRoomDialogOpen(false);
-                  setRoomFormData({ number: "", type: "single", price: "", floor: "", capacity: "" });
-                }} className="flex-1">Create & Assign</Button>
-                <Button variant="outline" onClick={() => setIsCreateRoomDialogOpen(false)}>Cancel</Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
 
         {/* Delete Guest Dialog */}
         <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
@@ -651,7 +641,7 @@ const Guests = () => {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-muted-foreground">Full Name</Label>
-                  <p className="text-lg font-semibold">{selectedGuest.name}</p>
+                  <p className="text-lg font-semibold">{selectedGuest.name || `${selectedGuest.firstName} ${selectedGuest.lastName}`}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -666,17 +656,22 @@ const Guests = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-muted-foreground">ID Number</Label>
-                    <p className="text-sm">{selectedGuest.idNumber}</p>
+                    <p className="text-sm">{selectedGuest.idNumber || selectedGuest.identificationNumber || 'N/A'}</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-muted-foreground">Nationality</Label>
-                    <p className="text-sm">{selectedGuest.nationality}</p>
+                    <p className="text-sm">{selectedGuest.nationality || 'N/A'}</p>
                   </div>
                 </div>
-                {selectedGuest.address && (
+                {(selectedGuest.address || (selectedGuest.address && selectedGuest.address.street)) && (
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-muted-foreground">Address</Label>
-                    <p className="text-sm">{selectedGuest.address}</p>
+                    <p className="text-sm">
+                      {typeof selectedGuest.address === 'string' 
+                        ? selectedGuest.address 
+                        : `${selectedGuest.address?.street}, ${selectedGuest.address?.city}, ${selectedGuest.address?.country}`
+                      }
+                    </p>
                   </div>
                 )}
                 {selectedGuest.specialRequests && (
@@ -692,23 +687,41 @@ const Guests = () => {
                     <p className="text-sm">{selectedGuest.emergencyContact.phone} • {selectedGuest.emergencyContact.relationship}</p>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Check-in Date</Label>
-                    <p className="text-sm font-semibold">{new Date(selectedGuest.checkIn).toLocaleDateString()}</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium text-muted-foreground">Check-out Date</Label>
-                    <p className="text-sm font-semibold">{new Date(selectedGuest.checkOut).toLocaleDateString()}</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-muted-foreground">Room</Label>
-                  <p className="text-sm font-semibold">
-                    Room {rooms.find(r => r.id === selectedGuest.roomId)?.number} - 
-                    {rooms.find(r => r.id === selectedGuest.roomId)?.type}
-                  </p>
-                </div>
+                {/* Show booking details if available */}
+                {(() => {
+                  const guestBooking = bookings.find(booking => 
+                    booking.guestDetails?.email === selectedGuest.email || booking.guestId === selectedGuest.id
+                  );
+                  const room = rooms.find((r) => r.id === guestBooking?.roomId);
+                  
+                  return guestBooking ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-muted-foreground">Check-in Date</Label>
+                          <p className="text-sm font-semibold">{new Date(guestBooking.checkIn).toLocaleDateString()}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-muted-foreground">Check-out Date</Label>
+                          <p className="text-sm font-semibold">{new Date(guestBooking.checkOut).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+                      {room && (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-muted-foreground">Room</Label>
+                          <p className="text-sm font-semibold">
+                            Room {room.number} - {room.type}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-muted-foreground">Booking Status</Label>
+                      <p className="text-sm text-muted-foreground">No active booking</p>
+                    </div>
+                  );
+                })()}
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-muted-foreground">Status</Label>
                   <Badge 
@@ -718,18 +731,25 @@ const Guests = () => {
                   </Badge>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium text-muted-foreground">Bookings</Label>
+                  <Label className="text-sm font-medium text-muted-foreground">Booking History</Label>
                   <div className="space-y-2">
-                    {mockBookings.filter(b => b.guestId === selectedGuest.id).length === 0 ? (
+                    {bookings.filter(b => 
+                      b.guestDetails?.email === selectedGuest.email || b.guestId === selectedGuest.id
+                    ).length === 0 ? (
                       <p className="text-sm text-muted-foreground">No bookings</p>
                     ) : (
-                      mockBookings.filter(b => b.guestId === selectedGuest.id).map(b => (
-                        <div key={b.id} className="text-sm flex justify-between border rounded p-2">
-                          <span>Room {rooms.find(r => r.id === b.roomId)?.number}</span>
-                          <span>{new Date(b.checkIn).toLocaleDateString()} - {new Date(b.checkOut).toLocaleDateString()}</span>
-                          <Badge variant="outline" className="capitalize">{b.status.replace('-', ' ')}</Badge>
-                        </div>
-                      ))
+                      bookings.filter(b => 
+                        b.guestDetails?.email === selectedGuest.email || b.guestId === selectedGuest.id
+                      ).map(b => {
+                        const room = rooms.find(r => r.id === b.roomId);
+                        return (
+                          <div key={b.id} className="text-sm flex justify-between border rounded p-2">
+                            <span>Room {room?.number || 'N/A'}</span>
+                            <span>{new Date(b.checkIn).toLocaleDateString()} - {new Date(b.checkOut).toLocaleDateString()}</span>
+                            <Badge variant="outline" className="capitalize">{b.status.replace('_', ' ')}</Badge>
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </div>

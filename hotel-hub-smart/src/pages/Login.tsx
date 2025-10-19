@@ -14,7 +14,7 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const { login, isLoading } = useAuth();
+  const { login, isLoading, error } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -34,8 +34,8 @@ const Login = () => {
       await login(email, password);
       toast.success("Login successful!");
       navigate("/dashboard"); // All users go to dashboard, which will handle role-specific content
-    } catch (error) {
-      toast.error("Login failed. Please check your credentials.");
+    } catch (error: any) {
+      toast.error(error.message || "Login failed. Please check your credentials.");
     }
   };
 
@@ -52,6 +52,11 @@ const Login = () => {
           <CardDescription>Sign in to manage your hotel operations</CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md text-sm">
+              {error}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -126,11 +131,11 @@ const Login = () => {
             <div className="mt-4 space-y-2">
               <p className="text-xs font-medium text-gray-700">Demo Credentials:</p>
               <div className="text-xs space-y-1 bg-gray-50 p-3 rounded-lg">
-                <div><strong>Admin:</strong> admin@hotel.com / admin123</div>
-                <div><strong>Manager:</strong> manager@hotel.com / manager123</div>
-                <div><strong>Receptionist:</strong> receptionist@hotel.com / receptionist123</div>
-                <div><strong>Housekeeping:</strong> housekeeping@hotel.com / housekeeping123</div>
-                <div><strong>Guest:</strong> guest@hotel.com / guest123</div>
+                <div><strong>Admin:</strong> admin@smarthotel.com / Admin123!</div>
+                <div><strong>Manager:</strong> manager@smarthotel.com / Manager123!</div>
+                <div><strong>Receptionist:</strong> receptionist@smarthotel.com / Reception123!</div>
+                <div><strong>Housekeeping:</strong> housekeeping@smarthotel.com / Housekeeping123!</div>
+                <div><strong>Guest:</strong> guest@smarthotel.com / Guest123!</div>
               </div>
               <div className="text-xs text-center text-gray-500 mt-2">
                 Note: Staff login is for hotel operations only. Guests should use the guest portal.

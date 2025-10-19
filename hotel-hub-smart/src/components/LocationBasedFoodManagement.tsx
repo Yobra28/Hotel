@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +24,8 @@ import {
   User
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import menuService, { type FoodOrder as BackendFoodOrder } from "@/services/menuService";
 import { 
-  mockFoodOrders, 
   mockHotelLocations, 
   mockDeliveryStaff,
   FoodOrder,
@@ -38,7 +38,7 @@ import {
 
 const LocationBasedFoodManagement = () => {
   const { user } = useAuth();
-  const [foodOrders, setFoodOrders] = useState<FoodOrder[]>(mockFoodOrders);
+  const [foodOrders, setFoodOrders] = useState<FoodOrder[]>([]);
   const [hotelLocations] = useState<HotelLocation[]>(mockHotelLocations);
   const [deliveryStaff, setDeliveryStaff] = useState<DeliveryStaff[]>(mockDeliveryStaff);
   const [selectedZone, setSelectedZone] = useState<DeliveryZone | "all">("all");
@@ -51,6 +51,61 @@ const LocationBasedFoodManagement = () => {
   const canAssignDelivery = user?.role === "admin" || user?.role === "receptionist";
   const canViewAllOrders = user?.role === "admin" || user?.role === "receptionist";
   const isHousekeeper = user?.role === "housekeeping";
+
+  // Map backend deliveryLocation (string) to a HotelLocation object for UI
+  const mapDeliveryLocation = (loc?: string | null): HotelLocation => {
+    const mappings: Record<string, HotelLocation | undefined> = {
+      restaurant: hotelLocations.find(l => l.type === 'restaurant'),
+      room: hotelLocations.find(l => l.type === 'room'),
+      poolside: hotelLocations.find(l => l.name.toLowerCase().includes('pool')), // custom map
+      spa: hotelLocations.find(l => l.type === 'spa'),
+    };
+    return (loc ? mappings[loc] : undefined) || hotelLocations[0];
+  };
+
+  // Load real orders from backend
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const backendOrders = canViewAllOrders
+          ? await menuService.getAllOrders()
+          : await menuService.getMyOrders();
+
+        const transformed: FoodOrder[] = (backendOrders as BackendFoodOrder[]).map((o) => ({
+          id: o._id,
+          guestId: o.guest,
+          roomId: o.room,
+          deliveryLocation: mapDeliveryLocation(o.deliveryLocation),
+          items: (o.items || []).map((it: BackendFoodOrder["items"][number]) => ({
+            menuItemId: it.menuItem,
+            quantity: it.quantity,
+            price: it.unitPrice,
+            specialInstructions: it.specialInstructions,
+          })),
+          totalAmount: o.totalAmount,
+          orderType: o.orderType,
+          status: o.status,
+          orderTime: (o as any).orderDate as any,
+          requestedDeliveryTime: (o as any).estimatedDeliveryTime || (o as any).requestedDeliveryTime,
+          actualDeliveryTime: (o as any).actualDeliveryTime,
+          paymentStatus: (o as any).paymentStatus || 'pending',
+          paymentMethod: (o as any).paymentMethod,
+          assignedKitchenStaff: (o as any).assignedKitchenStaff,
+          assignedDeliveryStaff: (o as any).assignedDeliveryStaff,
+          estimatedReadyTime: (o as any).estimatedReadyTime,
+          deliveryInstructions: (o as any).deliveryInstructions,
+          createdAt: (o as any).orderDate,
+          updatedAt: (o as any).updatedAt || (o as any).orderDate,
+        }));
+        setFoodOrders(transformed);
+      } catch (e) {
+        console.error('Failed to load food orders', e);
+        toast.error('Failed to load delivery data');
+      }
+    };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewAllOrders]);
 
   // Filter orders based on role
   const getFilteredOrders = () => {
@@ -110,18 +165,27 @@ const LocationBasedFoodManagement = () => {
     return iconMap[type] || "📍";
   };
 
-  const handleUpdateOrderStatus = (orderId: string, newStatus: OrderStatus) => {
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     if (!canManageOrders) {
       toast.error("You don't have permission to update orders");
       return;
     }
 
-    setFoodOrders(prev => prev.map(order => 
-      order.id === orderId 
-        ? { ...order, status: newStatus, updatedAt: new Date().toISOString() }
-        : order
-    ));
-    toast.success(`Order status updated to ${newStatus}`);
+    try {
+      const updated = await menuService.updateOrderStatus(orderId, newStatus);
+      setFoodOrders(prev => prev.map(order => 
+        order.id === orderId 
+          ? {
+              ...order,
+              status: updated.status,
+              updatedAt: new Date().toISOString()
+            }
+          : order
+      ));
+      toast.success(`Order status updated to ${newStatus}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update status');
+    }
   };
 
   const handleAssignDelivery = (staffId: string) => {

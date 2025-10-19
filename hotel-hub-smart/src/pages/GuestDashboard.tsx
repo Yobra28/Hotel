@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,23 +10,37 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { mockRooms, mockBookings, mockGuests } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
 import { GuestLayout } from "@/components/GuestLayout";
 import GuestFoodOrdering from "@/components/GuestFoodOrdering";
 import GuestSwimmingActivities from "@/components/GuestSwimmingActivities";
 import { Calendar, DollarSign, CreditCard, Search, Bed, Star, Clock, CheckCircle, User, Phone, Mail, MapPin, LogOut, Bell, Download, MessageCircle, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
+import roomService from "@/services/roomService";
+import bookingService from "@/services/bookingService";
 
 interface GuestBooking {
   id: string;
   roomId: string;
-    checkIn: string;
-    checkOut: string;
-  status: "confirmed" | "checked-in" | "checked-out" | "cancelled";
-    totalAmount: number;
+  checkIn: string;
+  checkOut: string;
+  status: "confirmed" | "checked_in" | "checked_out" | "cancelled" | "pending" | "no_show" | "completed";
+  totalAmount: number;
   paidAmount: number;
   guestId: string;
+  bookingNumber?: string;
+  adults: number;
+  children: number;
+  nights: number;
+  paymentStatus: string;
+  paymentMethod?: string;
+  specialRequests?: string;
+  createdAt: string;
+  updatedAt: string;
+  guestDetails?: any;
+  pricing?: any;
+  payments?: any[];
+  services?: any[];
 }
 
 const GuestDashboard = () => {
@@ -39,7 +54,23 @@ const GuestDashboard = () => {
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [selectedBooking, setSelectedBooking] = useState<GuestBooking | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [bookings, setBookings] = useState<GuestBooking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   
+  // Load data on component mount
+  useEffect(() => {
+    loadBookings();
+  }, []);
+
+  // Load rooms when bookings tab is accessed
+  useEffect(() => {
+    if (activeTab === "bookings" && rooms.length === 0) {
+      loadRooms();
+    }
+  }, [activeTab, rooms.length]);
+
   // Listen for tab changes from sidebar navigation
   useEffect(() => {
     const handleTabChange = (event: any) => {
@@ -57,6 +88,34 @@ const GuestDashboard = () => {
       window.removeEventListener("changeGuestTab", handleTabChange);
     };
   }, [location.state]);
+
+  // Load bookings from API
+  const loadBookings = async () => {
+    try {
+      setLoading(true);
+      const data = await bookingService.getTransformedMyBookings();
+      setBookings(data);
+    } catch (error) {
+      console.error('Error loading bookings:', error);
+      toast.error('Failed to load bookings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load rooms from API
+  const loadRooms = async () => {
+    try {
+      setRoomsLoading(true);
+      const data = await roomService.getTransformedRooms();
+      setRooms(data);
+    } catch (error) {
+      console.error('Error loading rooms:', error);
+      toast.error('Failed to load rooms');
+    } finally {
+      setRoomsLoading(false);
+    }
+  };
   
   const [bookingData, setBookingData] = useState({
     checkIn: "",
@@ -72,39 +131,58 @@ const GuestDashboard = () => {
     method: "mpesa",
   });
 
-  // Get guest bookings (mock data - in real app, filter by guest ID)
-  const guestBookings = mockBookings.filter(booking => booking.guestId === "1");
+  // Use real bookings from state
+  const guestBookings = bookings;
 
   // Filter available rooms
-  const availableRooms = mockRooms.filter(room => 
+  const availableRooms = rooms.filter(room => 
     room.status === "available" &&
     (selectedRoomType === "all" || room.type === selectedRoomType) &&
     room.number.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleRoomBooking = () => {
+  const handleRoomBooking = async () => {
     if (!bookingData.checkIn || !bookingData.checkOut || !bookingData.guestName || !bookingData.guestEmail || !bookingData.guestPhone) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    // Simulate booking creation
-    const newBooking: GuestBooking = {
-      id: Date.now().toString(),
-      roomId: selectedRoom.id,
-      checkIn: bookingData.checkIn,
-      checkOut: bookingData.checkOut,
-      status: "confirmed",
-      totalAmount: selectedRoom.price * Math.ceil((new Date(bookingData.checkOut).getTime() - new Date(bookingData.checkIn).getTime()) / (1000 * 60 * 60 * 24)),
-      paidAmount: 0,
-      guestId: "1",
-    };
+    try {
+      // Calculate number of adults and children (default to 1 adult)
+      const bookingPayload = {
+        roomId: selectedRoom.id,
+        checkInDate: bookingData.checkIn,
+        checkOutDate: bookingData.checkOut,
+        numberOfGuests: {
+          adults: 1,
+          children: 0
+        },
+        guestDetails: {
+          firstName: bookingData.guestName.split(' ')[0] || bookingData.guestName,
+          lastName: bookingData.guestName.split(' ').slice(1).join(' ') || '',
+          email: bookingData.guestEmail,
+          phone: bookingData.guestPhone,
+          idNumber: user?.idNumber || 'N/A'
+        },
+        source: 'website'
+      };
 
-    setIsBookingDialogOpen(false);
-    toast.success("Room booked successfully! Please proceed to payment.");
-    setSelectedBooking(newBooking);
-    setPaymentData({ ...paymentData, amount: newBooking.totalAmount.toString() });
-    setIsPaymentDialogOpen(true);
+      const newBooking = await bookingService.createBooking(bookingPayload);
+      const transformedBooking = bookingService.transformBooking(newBooking);
+
+      setIsBookingDialogOpen(false);
+      toast.success("Room booked successfully! Please proceed to payment.");
+      
+      // Refresh bookings
+      await loadBookings();
+      
+      setSelectedBooking(transformedBooking);
+      setPaymentData({ ...paymentData, amount: transformedBooking.totalAmount.toString() });
+      setIsPaymentDialogOpen(true);
+    } catch (error: any) {
+      console.error('Error creating booking:', error);
+      toast.error(error.message || 'Failed to create booking');
+    }
   };
 
   const handlePayment = async () => {
@@ -153,12 +231,18 @@ const GuestDashboard = () => {
     switch (status) {
       case "confirmed":
         return <Badge className="bg-blue-100 text-blue-800"><CheckCircle className="h-3 w-3 mr-1" />Confirmed</Badge>;
-      case "checked-in":
+      case "checked_in":
         return <Badge className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Checked In</Badge>;
-      case "checked-out":
+      case "checked_out":
         return <Badge className="bg-gray-100 text-gray-800"><Clock className="h-3 w-3 mr-1" />Checked Out</Badge>;
       case "cancelled":
         return <Badge className="bg-red-100 text-red-800">Cancelled</Badge>;
+      case "pending":
+        return <Badge className="bg-yellow-100 text-yellow-800"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
+      case "no_show":
+        return <Badge className="bg-red-100 text-red-800">No Show</Badge>;
+      case "completed":
+        return <Badge className="bg-green-100 text-green-800">Completed</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -199,21 +283,32 @@ const GuestDashboard = () => {
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
             {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <Card className="animate-fade-in">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Bookings</p>
-                      <p className="text-3xl font-bold">{guestBookings.length}</p>
-                      <p className="text-xs text-green-600 mt-1">+2 this month</p>
+            {loading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardContent className="p-6">
+                      <div className="h-20 bg-gray-200 rounded"></div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <Card className="animate-fade-in">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Total Bookings</p>
+                        <p className="text-3xl font-bold">{guestBookings.length}</p>
+                        <p className="text-xs text-green-600 mt-1">Lifetime bookings</p>
+                      </div>
+                      <div className="p-3 bg-blue-100 rounded-lg">
+                        <Calendar className="h-6 w-6 text-blue-600" />
+                      </div>
                     </div>
-                    <div className="p-3 bg-blue-100 rounded-lg">
-                      <Calendar className="h-6 w-6 text-blue-600" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
               <Card className="animate-fade-in">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
@@ -241,8 +336,9 @@ const GuestDashboard = () => {
                     </div>
                   </div>
                 </CardContent>
-              </Card>
-            </div>
+                </Card>
+              </div>
+            )}
                   
             {/* Recent Bookings */}
             <Card>
@@ -251,29 +347,40 @@ const GuestDashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {guestBookings.slice(0, 3).map((booking) => {
-                    const room = mockRooms.find(r => r.id === booking.roomId);
-                    return (
-                      <div key={booking.id} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <div className="w-2 h-2 bg-primary rounded-full"></div>
-                        <div>
-                            <p className="font-medium">Room {room?.number} - {room?.type}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {new Date(booking.checkIn).toLocaleDateString()} - {new Date(booking.checkOut).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                        <div className="text-right">
-                          <p className="font-semibold">KES {booking.totalAmount}</p>
-                          {getBookingStatusBadge(booking.status)}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {loading ? (
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-16 bg-gray-200 rounded animate-pulse"></div>
+                      ))}
                     </div>
-                </CardContent>
-              </Card>
+                  ) : guestBookings.length > 0 ? (
+                    guestBookings.slice(0, 3).map((booking) => {
+                      // Find room by roomId in the rooms state, fallback to basic display
+                      const room = rooms.find(r => r.id === booking.roomId) || { number: 'N/A', type: 'Unknown' };
+                      return (
+                        <div key={booking.id} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 bg-primary rounded-full"></div>
+                            <div>
+                              <p className="font-medium">Room {room.number} - {room.type}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {new Date(booking.checkIn).toLocaleDateString()} - {new Date(booking.checkOut).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold">KES {booking.totalAmount}</p>
+                            {getBookingStatusBadge(booking.status)}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-muted-foreground text-center py-8">No bookings yet. Book a room to get started!</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Bookings Tab */}
@@ -315,8 +422,27 @@ const GuestDashboard = () => {
             </div>
 
             {/* Room Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {availableRooms.map((room) => (
+            {roomsLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardHeader>
+                      <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                      <div className="h-4 bg-gray-200 rounded w-1/2 mt-2"></div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div className="h-4 bg-gray-200 rounded w-full"></div>
+                        <div className="h-4 bg-gray-200 rounded w-full"></div>
+                        <div className="h-8 bg-gray-200 rounded w-full"></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : availableRooms.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {availableRooms.map((room) => (
                 <Card key={room.id} className="hover:shadow-lg transition-all duration-300">
               <CardHeader>
                     <div className="flex items-start justify-between">
@@ -420,9 +546,17 @@ const GuestDashboard = () => {
                       </Dialog>
                 </div>
               </CardContent>
-            </Card>
-              ))}
-            </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg mb-4">No rooms available matching your criteria</p>
+                <Button onClick={loadRooms} variant="outline">
+                  Refresh Rooms
+                </Button>
+              </div>
+            )}
 
           </TabsContent>
           
@@ -434,18 +568,27 @@ const GuestDashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {guestBookings.length > 0 ? (
+                  {loading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-32 bg-gray-200 rounded animate-pulse"></div>
+                      ))}
+                    </div>
+                  ) : guestBookings.length > 0 ? (
                     guestBookings.map((booking) => {
-                      const room = mockRooms.find(r => r.id === booking.roomId);
+                      const room = rooms.find(r => r.id === booking.roomId) || { number: 'N/A', type: 'Unknown' };
                       return (
                         <div key={booking.id} className="border rounded-lg p-4">
                           <div className="flex items-start justify-between mb-3">
-                  <div>
-                              <p className="font-semibold">Room {room?.number}</p>
-                              <p className="text-sm text-muted-foreground capitalize">{room?.type}</p>
-                      </div>
+                            <div>
+                              <p className="font-semibold">Room {room.number}</p>
+                              <p className="text-sm text-muted-foreground capitalize">{room.type}</p>
+                              {booking.bookingNumber && (
+                                <p className="text-xs text-muted-foreground">Booking #{booking.bookingNumber}</p>
+                              )}
+                            </div>
                             {getBookingStatusBadge(booking.status)}
-                      </div>
+                          </div>
                           <div className="grid grid-cols-2 gap-4 text-sm">
                             <div>
                               <p className="text-muted-foreground">Check-in:</p>
@@ -507,19 +650,25 @@ const GuestDashboard = () => {
                 </CardHeader>
                 <CardContent>
                 <div className="space-y-4">
-                  {getPendingPayments().length > 0 ? (
+                  {loading ? (
+                    <div className="space-y-4">
+                      {[1, 2].map((i) => (
+                        <div key={i} className="h-24 bg-gray-200 rounded animate-pulse"></div>
+                      ))}
+                    </div>
+                  ) : getPendingPayments().length > 0 ? (
                     getPendingPayments().map((booking) => {
-                      const room = mockRooms.find(r => r.id === booking.roomId);
+                      const room = rooms.find(r => r.id === booking.roomId) || { number: 'N/A', type: 'Unknown' };
                       const outstanding = booking.totalAmount - booking.paidAmount;
                       return (
                         <div key={booking.id} className="border rounded-lg p-4">
                           <div className="flex items-center justify-between mb-3">
-                      <div>
-                              <p className="font-semibold">Room {room?.number} - {room?.type}</p>
+                            <div>
+                              <p className="font-semibold">Room {room.number} - {room.type}</p>
                               <p className="text-sm text-muted-foreground">
-                                Booking #{booking.id} • {new Date(booking.checkIn).toLocaleDateString()}
+                                {booking.bookingNumber ? `Booking #${booking.bookingNumber}` : `Booking #${booking.id}`} • {new Date(booking.checkIn).toLocaleDateString()}
                               </p>
-                          </div>
+                            </div>
                             <div className="text-right">
                               <p className="text-lg font-bold text-orange-600">KES {outstanding}</p>
                               <p className="text-sm text-muted-foreground">Outstanding</p>
@@ -562,23 +711,33 @@ const GuestDashboard = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {guestBookings.filter(b => b.paidAmount > 0).map((booking) => {
-                    const room = mockRooms.find(r => r.id === booking.roomId);
-                    return (
-                      <div key={booking.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                          <p className="font-medium">Room {room?.number} - {room?.type}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {new Date(booking.checkIn).toLocaleDateString()} • Booking #{booking.id}
-                        </p>
-                      </div>
+                  {loading ? (
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-16 bg-gray-200 rounded animate-pulse"></div>
+                      ))}
+                    </div>
+                  ) : guestBookings.filter(b => b.paidAmount > 0).length > 0 ? (
+                    guestBookings.filter(b => b.paidAmount > 0).map((booking) => {
+                      const room = rooms.find(r => r.id === booking.roomId) || { number: 'N/A', type: 'Unknown' };
+                      return (
+                        <div key={booking.id} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div>
+                            <p className="font-medium">Room {room.number} - {room.type}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(booking.checkIn).toLocaleDateString()} • {booking.bookingNumber ? `Booking #${booking.bookingNumber}` : `Booking #${booking.id}`}
+                            </p>
+                          </div>
                         <div className="text-right">
                           <p className="font-semibold text-green-600">KES {booking.paidAmount}</p>
                           <Badge className="bg-green-100 text-green-800">Paid</Badge>
                     </div>
                   </div>
-                    );
-                  })}
+                      );
+                    })
+                  ) : (
+                    <p className="text-muted-foreground text-center py-8">No payment history available</p>
+                  )}
                 </div>
                 </CardContent>
               </Card>

@@ -1,226 +1,105 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import authService, { User as ApiUser, RegisterData, LoginData } from "@/services/authService";
 
-export type UserRole = "admin" | "receptionist" | "housekeeping" | "guest";
-
-// Demo users - these are pre-created for demonstration purposes
-const DEMO_USERS = [
-  {
-    id: "admin-1",
-    firstName: "Super",
-    lastName: "Admin",
-    name: "Super Admin",
-    email: "admin@hotel.com",
-    role: "admin" as UserRole,
-    phone: "+254 700 000 000",
-    idNumber: "ADMIN001",
-    department: "Management",
-    password: "admin123" // In real app, this would be hashed
-  },
-  {
-    id: "admin-2", 
-    firstName: "Hotel",
-    lastName: "Manager",
-    name: "Hotel Manager",
-    email: "manager@hotel.com",
-    role: "admin" as UserRole,
-    phone: "+254 700 000 001",
-    idNumber: "ADMIN002",
-    department: "Management",
-    password: "manager123"
-  },
-  {
-    id: "receptionist-1",
-    firstName: "Sarah",
-    lastName: "Johnson",
-    name: "Sarah Johnson",
-    email: "receptionist@hotel.com",
-    role: "receptionist" as UserRole,
-    phone: "+254 700 000 002",
-    idNumber: "REC001",
-    department: "Front Desk",
-    password: "receptionist123"
-  },
-  {
-    id: "housekeeping-1",
-    firstName: "Mary",
-    lastName: "Wanjiku",
-    name: "Mary Wanjiku",
-    email: "housekeeping@hotel.com",
-    role: "housekeeping" as UserRole,
-    phone: "+254 700 000 003",
-    idNumber: "HSK001",
-    department: "Housekeeping",
-    password: "housekeeping123"
-  },
-  {
-    id: "guest-1",
-    firstName: "John",
-    lastName: "Doe",
-    name: "John Doe",
-    email: "guest@hotel.com",
-    role: "guest" as UserRole,
-    phone: "+254 700 000 004",
-    idNumber: "GUEST001",
-    department: undefined,
-    password: "guest123"
-  }
-];
-
-interface User {
-  id: string;
+// Create a compatible User interface for the frontend
+export interface User {
+  _id: string;
+  id?: string; // For backward compatibility
   firstName: string;
   lastName: string;
-  name: string;
+  name?: string; // Computed from firstName + lastName
   email: string;
   role: UserRole;
   phone?: string;
   idNumber?: string;
   department?: string;
-  token?: string;
-  refreshToken?: string;
+  isActive: boolean;
+  isEmailVerified: boolean;
+  lastLogin?: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-interface RegisterData {
-  firstName: string;
-  lastName: string;
-  email: string;
-  password: string;
-  role?: UserRole; // Optional, defaults to 'guest' for public registration
-  phone: string;
-  idNumber: string;
-  department?: string;
-}
+export type UserRole = "admin" | "receptionist" | "housekeeping" | "guest";
 
 interface AuthContextType {
   user: User | null;
   login: (email: string, password: string, role?: UserRole) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
-  logout: () => void;
-  refreshToken: () => Promise<boolean>;
+  logout: () => Promise<void>;
+  updateProfile: (data: Partial<User>) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   isAuthenticated: boolean;
   isLoading: boolean;
-  // User Management (Admin only)
-  createUser: (data: RegisterData) => Promise<User>;
-  updateUser: (userId: string, data: Partial<RegisterData>) => Promise<User>;
-  deleteUser: (userId: string) => Promise<void>;
-  getAllUsers: () => Promise<User[]>;
-  canManageUsers: () => boolean;
+  error: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Helper function to convert API user to frontend user
+const convertApiUser = (apiUser: ApiUser): User => {
+  return {
+    ...apiUser,
+    id: apiUser._id, // Add id for backward compatibility
+    name: `${apiUser.firstName} ${apiUser.lastName}`, // Compute full name
+  };
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const initializeAuth = async () => {
-      const storedUser = localStorage.getItem("hotelUser");
-      const storedToken = localStorage.getItem("hotelToken");
-      const storedRefreshToken = localStorage.getItem("hotelRefreshToken");
-      
-      if (storedUser && storedToken) {
-        const userData = JSON.parse(storedUser);
-        setUser({ ...userData, token: storedToken, refreshToken: storedRefreshToken || undefined });
-        
-        // Check if token is expired and refresh if needed
-        if (storedRefreshToken) {
-          const tokenValid = await checkTokenValidity(storedToken);
-          if (!tokenValid) {
-            const refreshed = await refreshToken();
-            if (!refreshed) {
-              logout();
+      try {
+        // Check if user is already authenticated
+        if (authService.isAuthenticated()) {
+          const storedUser = authService.getStoredUser();
+          if (storedUser) {
+            const frontendUser = convertApiUser(storedUser);
+            setUser(frontendUser);
+            
+            // Optionally verify with server
+            try {
+              const { user: currentUser } = await authService.getCurrentUser();
+              const convertedUser = convertApiUser(currentUser);
+              setUser(convertedUser);
+              // Update stored user data
+              localStorage.setItem('hotelUser', JSON.stringify(currentUser));
+            } catch (error) {
+              // Token might be expired, user will need to login again
+              console.log('Token verification failed:', error);
+              await logout();
             }
           }
         }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        setError('Authentication initialization failed');
+      } finally {
+        setIsLoading(false);
       }
     };
 
     initializeAuth();
   }, []);
 
-  const checkTokenValidity = async (token: string): Promise<boolean> => {
-    try {
-      // Simulate token validation - in real app, decode JWT and check expiry
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const now = Date.now() / 1000;
-      return payload.exp > now;
-    } catch {
-      return false;
-    }
-  };
-
   const login = async (email: string, password: string, role?: UserRole) => {
     setIsLoading(true);
+    setError(null);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      let userFound: User | null = null;
-      
-      // First, check demo users
-      const demoUser = DEMO_USERS.find(user => 
-        user.email === email && user.password === password
-      );
-      if (demoUser) {
-        userFound = {
-          id: demoUser.id,
-          firstName: demoUser.firstName,
-          lastName: demoUser.lastName,
-          name: demoUser.name,
-          email: demoUser.email,
-          role: demoUser.role,
-          phone: demoUser.phone,
-          idNumber: demoUser.idNumber,
-          department: demoUser.department,
-          token: "mock.jwt.token",
-          refreshToken: "mock.refresh.token",
-        };
+      const credentials: LoginData = { email, password };
+      if (role) {
+        credentials.role = role;
       }
       
-      // If not found in demo users, check created users (receptionist/housekeeping)
-      if (!userFound) {
-        const existingUsers = JSON.parse(localStorage.getItem("hotelUsers") || "[]");
-        const createdUser = existingUsers.find((u: any) => 
-          u.email === email && (u.role === "receptionist" || u.role === "housekeeping")
-        );
-        if (createdUser) {
-          userFound = {
-            ...createdUser,
-            token: "mock.jwt.token",
-            refreshToken: "mock.refresh.token",
-          };
-        }
-      }
-      
-      // If not found in created users, check guest users
-      if (!userFound) {
-        const existingGuests = JSON.parse(localStorage.getItem("hotelGuests") || "[]");
-        const guestUser = existingGuests.find((g: any) => 
-          g.email === email && g.role === "guest"
-        );
-        if (guestUser) {
-          userFound = {
-            ...guestUser,
-            token: "mock.jwt.token",
-            refreshToken: "mock.refresh.token",
-          };
-        }
-      }
-      
-      // If role is specified and found user doesn't match, reject
-      if (userFound && role && userFound.role !== role) {
-        throw new Error("Invalid credentials for this login type");
-      }
-      
-      if (!userFound) {
-        throw new Error("Invalid credentials");
-      }
-      
-      setUser(userFound);
-      localStorage.setItem("hotelUser", JSON.stringify(userFound));
-      localStorage.setItem("hotelToken", userFound.token!);
-      localStorage.setItem("hotelRefreshToken", userFound.refreshToken!);
+      const response = await authService.login(credentials);
+      const convertedUser = convertApiUser(response.data.user);
+      setUser(convertedUser);
+    } catch (error: any) {
+      setError(error.message || 'Login failed');
+      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -228,198 +107,59 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const register = async (data: RegisterData) => {
     setIsLoading(true);
+    setError(null);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Default role to 'guest' for public registration
-      const userRole = data.role || "guest";
-      
-      const newUser: User = {
-        id: Date.now().toString(),
-        firstName: data.firstName,
-        lastName: data.lastName,
-        name: `${data.firstName} ${data.lastName}`,
-        email: data.email,
-        role: userRole,
-        phone: data.phone,
-        idNumber: data.idNumber,
-        department: data.department,
-        token: "mock.jwt.token",
-        refreshToken: "mock.refresh.token",
-      };
-      
-      // Store user in appropriate location based on role
-      if (userRole === "guest") {
-        // Store guest users separately
-        const existingGuests = JSON.parse(localStorage.getItem("hotelGuests") || "[]");
-        existingGuests.push(newUser);
-        localStorage.setItem("hotelGuests", JSON.stringify(existingGuests));
-      } else if (userRole === "receptionist" || userRole === "housekeeping") {
-        // Staff users created by admin
-        const existingUsers = JSON.parse(localStorage.getItem("hotelUsers") || "[]");
-        existingUsers.push(newUser);
-        localStorage.setItem("hotelUsers", JSON.stringify(existingUsers));
-      }
-      
-      setUser(newUser);
-      localStorage.setItem("hotelUser", JSON.stringify(newUser));
-      localStorage.setItem("hotelToken", newUser.token!);
-      localStorage.setItem("hotelRefreshToken", newUser.refreshToken!);
+      const response = await authService.register(data);
+      const convertedUser = convertApiUser(response.data.user);
+      setUser(convertedUser);
+    } catch (error: any) {
+      setError(error.message || 'Registration failed');
+      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const refreshToken = async (): Promise<boolean> => {
-    try {
-      const storedRefreshToken = localStorage.getItem("hotelRefreshToken");
-      if (!storedRefreshToken) return false;
-
-      // Simulate API call to refresh token
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const newToken = "new.mock.jwt.token";
-      const newRefreshToken = "new.mock.refresh.token";
-      
-      if (user) {
-        const updatedUser = { ...user, token: newToken, refreshToken: newRefreshToken };
-        setUser(updatedUser);
-        localStorage.setItem("hotelUser", JSON.stringify(updatedUser));
-        localStorage.setItem("hotelToken", newToken);
-        localStorage.setItem("hotelRefreshToken", newRefreshToken);
-      }
-      
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem("hotelUser");
-    localStorage.removeItem("hotelToken");
-    localStorage.removeItem("hotelRefreshToken");
-  };
-
-  // User Management Functions (Admin only)
-  const createUser = async (data: RegisterData): Promise<User> => {
-    if (user?.role !== "admin") {
-      throw new Error("Unauthorized: Only admin can create users");
-    }
-    
-    // Only allow creating receptionist and housekeeping roles
-    if (!data.role || (data.role !== "receptionist" && data.role !== "housekeeping")) {
-      throw new Error("Admin can only create receptionist and housekeeping users");
-    }
-    
+  const logout = async () => {
     setIsLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const newUser: User = {
-        id: Date.now().toString(),
-        firstName: data.firstName,
-        lastName: data.lastName,
-        name: `${data.firstName} ${data.lastName}`,
-        email: data.email,
-        role: data.role,
-        phone: data.phone,
-        idNumber: data.idNumber,
-        department: data.department,
-      };
-      
-      // Store users in localStorage for demo
-      const existingUsers = JSON.parse(localStorage.getItem("hotelUsers") || "[]");
-      existingUsers.push(newUser);
-      localStorage.setItem("hotelUsers", JSON.stringify(existingUsers));
-      
-      return newUser;
+      await authService.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
     } finally {
+      setUser(null);
+      setError(null);
       setIsLoading(false);
     }
   };
 
-  const updateUser = async (userId: string, data: Partial<RegisterData>): Promise<User> => {
-    if (user?.role !== "admin") {
-      throw new Error("Unauthorized: Only admin can update users");
-    }
-    
+  const updateProfile = async (data: Partial<User>) => {
     setIsLoading(true);
+    setError(null);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const existingUsers = JSON.parse(localStorage.getItem("hotelUsers") || "[]");
-      const userIndex = existingUsers.findIndex((u: User) => u.id === userId);
-      
-      if (userIndex === -1) {
-        throw new Error("User not found");
-      }
-      
-      const updatedUser = {
-        ...existingUsers[userIndex],
-        ...data,
-        name: data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : existingUsers[userIndex].name,
-      };
-      
-      existingUsers[userIndex] = updatedUser;
-      localStorage.setItem("hotelUsers", JSON.stringify(existingUsers));
-      
-      return updatedUser;
+      const response = await authService.updateProfile(data);
+      const convertedUser = convertApiUser(response.user);
+      setUser(convertedUser);
+    } catch (error: any) {
+      setError(error.message || 'Profile update failed');
+      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const deleteUser = async (userId: string): Promise<void> => {
-    if (user?.role !== "admin") {
-      throw new Error("Unauthorized: Only admin can delete users");
-    }
-    
+  const changePassword = async (currentPassword: string, newPassword: string) => {
     setIsLoading(true);
+    setError(null);
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const existingUsers = JSON.parse(localStorage.getItem("hotelUsers") || "[]");
-      const filteredUsers = existingUsers.filter((u: User) => u.id !== userId);
-      localStorage.setItem("hotelUsers", JSON.stringify(filteredUsers));
+      await authService.changePassword(currentPassword, newPassword);
+      // After password change, user typically needs to login again
+    } catch (error: any) {
+      setError(error.message || 'Password change failed');
+      throw error;
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const getAllUsers = async (): Promise<User[]> => {
-    if (user?.role !== "admin") {
-      throw new Error("Unauthorized: Only admin can view all users");
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Combine demo users with created users
-    const createdUsers = JSON.parse(localStorage.getItem("hotelUsers") || "[]");
-    const demoStaffUsers = DEMO_USERS.filter(user => user.role !== "guest").map(user => ({
-      id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      phone: user.phone,
-      idNumber: user.idNumber,
-      department: user.department,
-    }));
-    const allUsers = [
-      ...demoStaffUsers,
-      ...createdUsers
-    ];
-    
-    return allUsers;
-  };
-
-  const canManageUsers = (): boolean => {
-    return user?.role === "admin";
   };
 
   return (
@@ -429,14 +169,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         login,
         register,
         logout,
-        refreshToken,
+        updateProfile,
+        changePassword,
         isAuthenticated: !!user,
         isLoading,
-        createUser,
-        updateUser,
-        deleteUser,
-        getAllUsers,
-        canManageUsers,
+        error,
       }}
     >
       {children}

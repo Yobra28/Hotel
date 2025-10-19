@@ -8,11 +8,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { mockHousekeepingTasks, mockRooms, HousekeepingTask } from "@/data/mockData";
+import { HousekeepingTask as MockTask } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
 import { CheckCircle, Clock, AlertCircle, Plus, Edit, Trash2, User, Calendar, Search, RefreshCw, Shield } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import housekeepingService from "@/services/housekeepingService";
+import roomService from "@/services/roomService";
+
+type HKTask = {
+  id: string;
+  roomId: string;
+  assignedTo: string;
+  taskType: 'cleaning' | 'maintenance' | 'inspection' | 'deep_clean';
+  status: 'pending' | 'in-progress' | 'completed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high';
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
 const Housekeeping = () => {
   const { user } = useAuth();
@@ -25,11 +39,37 @@ const Housekeeping = () => {
     "John Ochieng",
     "Grace Wanjiku"
   ];
-  const [tasks, setTasks] = useState<HousekeepingTask[]>(() => {
-    const savedTasks = localStorage.getItem("housekeepingTasks");
-    return savedTasks ? JSON.parse(savedTasks) : mockHousekeepingTasks;
-  });
-  const [selectedTask, setSelectedTask] = useState<HousekeepingTask | null>(null);
+  const [tasks, setTasks] = useState<HKTask[]>([]);
+  const [rooms, setRooms] = useState<any[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [backendTasks, backendRooms] = await Promise.all([
+          user?.role === 'housekeeping' ? housekeepingService.myTasks() : housekeepingService.listTasks(),
+          roomService.getTransformedRooms(),
+        ]);
+        const t = (backendTasks || []).map((bt: any) => ({
+          id: bt._id,
+          roomId: bt.roomId,
+          assignedTo: bt.assignedTo,
+          taskType: bt.taskType,
+          status: bt.status,
+          priority: bt.priority,
+          description: bt.description,
+          createdAt: bt.createdAt,
+          updatedAt: bt.updatedAt,
+        }));
+        setTasks(t);
+        setRooms(backendRooms || []);
+      } catch (e) {
+        console.error('Failed to load housekeeping data', e);
+        toast.error('Failed to load housekeeping data');
+      }
+    };
+    load();
+  }, [user?.role]);
+  const [selectedTask, setSelectedTask] = useState<HKTask | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -51,7 +91,7 @@ const Housekeeping = () => {
   const canUpdateTaskStatus = user?.role === "housekeeping";
 
   const filteredTasks = tasks.filter((task) => {
-    const room = mockRooms.find(r => r.id === task.roomId);
+    const room = rooms.find((r: any) => r.id === task.roomId);
     const matchesSearch = 
       room?.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       task.assignedTo.toLowerCase().includes(searchTerm.toLowerCase());
@@ -60,80 +100,94 @@ const Housekeeping = () => {
     return matchesSearch && matchesStatus && matchesPriority;
   });
 
-  const handleUpdateStatus = (taskId: string, newStatus: string) => {
-    const updatedTasks = tasks.map(task =>
-      task.id === taskId ? { 
-        ...task, 
-        status: newStatus as any,
-        updatedAt: new Date().toISOString()
-      } : task
-    );
-    setTasks(updatedTasks);
-    localStorage.setItem("housekeepingTasks", JSON.stringify(updatedTasks));
-    toast.success(`Task #${taskId} marked as ${newStatus}`);
+  const handleUpdateStatus = async (taskId: string, newStatus: string) => {
+    try {
+      const updated = await housekeepingService.updateStatus(taskId, newStatus as any);
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: updated.status, updatedAt: new Date().toISOString() } : t));
+      toast.success(`Task #${taskId} marked as ${newStatus}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update status');
+    }
   };
 
-  const handleAddTask = () => {
+  const handleAddTask = async () => {
     if (!formData.roomId || !formData.assignedTo) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const newTask: HousekeepingTask = {
-      id: Date.now().toString(),
-      roomId: formData.roomId,
-      assignedTo: formData.assignedTo,
-      status: "pending",
-      priority: formData.priority,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      description: formData.description,
-    };
-
-    const updatedTasks = [...tasks, newTask];
-    setTasks(updatedTasks);
-    localStorage.setItem("housekeepingTasks", JSON.stringify(updatedTasks));
-    setIsAddDialogOpen(false);
-    resetForm();
-    toast.success("Task created successfully!");
+    try {
+      const created = await housekeepingService.createTask({
+        roomId: formData.roomId,
+        assignedTo: formData.assignedTo,
+        priority: formData.priority,
+        description: formData.description,
+        taskType: 'cleaning',
+      } as any);
+      const newTask: HKTask = {
+        id: created._id,
+        roomId: created.roomId,
+        assignedTo: created.assignedTo,
+        priority: created.priority,
+        taskType: created.taskType,
+        status: created.status,
+        description: created.description,
+        createdAt: created.createdAt as any,
+        updatedAt: created.updatedAt as any,
+      };
+      setTasks(prev => [...prev, newTask]);
+      setIsAddDialogOpen(false);
+      resetForm();
+      toast.success("Task created successfully!");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to create task');
+    }
   };
 
-  const handleEditTask = () => {
+  const handleEditTask = async () => {
     if (!selectedTask || !formData.roomId || !formData.assignedTo) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const updatedTasks = tasks.map(task =>
-      task.id === selectedTask.id
-        ? {
-            ...task,
-            roomId: formData.roomId,
-            assignedTo: formData.assignedTo,
-            priority: formData.priority,
-            description: formData.description,
-            updatedAt: new Date().toISOString(),
-          }
-        : task
-    );
-
-    setTasks(updatedTasks);
-    localStorage.setItem("housekeepingTasks", JSON.stringify(updatedTasks));
-    setIsEditDialogOpen(false);
-    setSelectedTask(null);
-    resetForm();
-    toast.success("Task updated successfully!");
+    try {
+      if (!selectedTask) return;
+      const updated = await housekeepingService.updateTask(selectedTask.id, {
+        roomId: formData.roomId,
+        assignedTo: formData.assignedTo,
+        priority: formData.priority,
+        description: formData.description,
+      } as any);
+      setTasks(prev => prev.map(task => task.id === selectedTask.id ? {
+        ...task,
+        roomId: updated.roomId,
+        assignedTo: updated.assignedTo,
+        priority: updated.priority,
+        description: updated.description,
+        updatedAt: new Date().toISOString(),
+      } : task));
+      setIsEditDialogOpen(false);
+      setSelectedTask(null);
+      resetForm();
+      toast.success("Task updated successfully!");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update task');
+    }
   };
 
-  const handleDeleteTask = () => {
+  const handleDeleteTask = async () => {
     if (!selectedTask) return;
 
-    const updatedTasks = tasks.filter(task => task.id !== selectedTask.id);
-    setTasks(updatedTasks);
-    localStorage.setItem("housekeepingTasks", JSON.stringify(updatedTasks));
-    setIsDeleteDialogOpen(false);
-    setSelectedTask(null);
-    toast.success("Task deleted successfully!");
+    if (!selectedTask) return;
+    try {
+      await housekeepingService.deleteTask(selectedTask.id);
+      setTasks(prev => prev.filter(task => task.id !== selectedTask.id));
+      setIsDeleteDialogOpen(false);
+      setSelectedTask(null);
+      toast.success("Task deleted successfully!");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete task');
+    }
   };
 
   const resetForm = () => {
@@ -145,7 +199,7 @@ const Housekeeping = () => {
     });
   };
 
-  const openEditDialog = (task: HousekeepingTask) => {
+  const openEditDialog = (task: HKTask) => {
     setSelectedTask(task);
     setFormData({
       roomId: task.roomId,
@@ -156,7 +210,7 @@ const Housekeeping = () => {
     setIsEditDialogOpen(true);
   };
 
-  const openDeleteDialog = (task: HousekeepingTask) => {
+  const openDeleteDialog = (task: HKTask) => {
     setSelectedTask(task);
     setIsDeleteDialogOpen(true);
   };
@@ -228,7 +282,7 @@ const Housekeeping = () => {
                         <SelectValue placeholder="Select room" />
                       </SelectTrigger>
                       <SelectContent>
-                        {mockRooms.filter(room => room.status === "cleaning" || room.status === "maintenance").map((room) => (
+                        {rooms.map((room: any) => (
                           <SelectItem key={room.id} value={room.id}>
                             Room {room.number} - {room.type}
                           </SelectItem>
@@ -361,7 +415,7 @@ const Housekeeping = () => {
         {/* Task List */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {userTasks.map((task) => {
-            const room = mockRooms.find((r) => r.id === task.roomId);
+            const room = rooms.find((r: any) => r.id === task.roomId);
             return (
               <Card key={task.id} className="hover:shadow-lg transition-all duration-300 animate-fade-in">
                 <CardContent className="p-6">
@@ -463,7 +517,7 @@ const Housekeeping = () => {
                     <SelectValue placeholder="Select room" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockRooms.map((room) => (
+                    {rooms.map((room: any) => (
                       <SelectItem key={room.id} value={room.id}>
                         Room {room.number} - {room.type}
                       </SelectItem>

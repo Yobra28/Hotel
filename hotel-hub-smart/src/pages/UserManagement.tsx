@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth, UserRole } from "@/contexts/AuthContext";
 import { Plus, Edit, Trash2, Users, Shield, UserCheck, UserX, Search } from "lucide-react";
 import { toast } from "sonner";
+import adminService, { type StaffUserApi } from "@/services/adminService";
 
 interface StaffUser {
   id: string;
@@ -29,34 +30,7 @@ interface StaffUser {
 
 const UserManagement = () => {
   const { user } = useAuth();
-  const [staff, setStaff] = useState<StaffUser[]>([
-    {
-      id: "1",
-      firstName: "Mary",
-      lastName: "Johnson",
-      email: "mary@hotel.com",
-      role: "receptionist",
-      phone: "+254712345678",
-      idNumber: "12345678",
-      department: "Front Desk",
-      isActive: true,
-      createdAt: "2024-01-01",
-      lastLogin: "2024-01-17"
-    },
-    {
-      id: "2",
-      firstName: "Peter",
-      lastName: "Kamau",
-      email: "peter@hotel.com",
-      role: "housekeeping",
-      phone: "+254723456789",
-      idNumber: "87654321",
-      department: "Housekeeping",
-      isActive: true,
-      createdAt: "2024-01-02",
-      lastLogin: "2024-01-16"
-    }
-  ]);
+  const [staff, setStaff] = useState<StaffUser[]>([]);
 
   const [selectedUser, setSelectedUser] = useState<StaffUser | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -75,82 +49,78 @@ const UserManagement = () => {
     department: "",
   });
 
-  const filteredStaff = staff.filter((member) => {
-    const matchesSearch = 
-      member.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === "all" || member.role === roleFilter;
-    return matchesSearch && matchesRole;
-  });
+  const filteredStaff = staff; // Server-side filtering applied via query params
 
-  const handleAddStaff = () => {
+  const handleAddStaff = async () => {
     if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone || !formData.idNumber) {
       toast.error("Please fill in all required fields");
       return;
     }
-
-    const newStaff: StaffUser = {
-      id: Date.now().toString(),
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      email: formData.email,
-      role: formData.role,
-      phone: formData.phone,
-      idNumber: formData.idNumber,
-      department: formData.department,
-      isActive: true,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-
-    setStaff([...staff, newStaff]);
+    try {
+      await adminService.createStaff({
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        role: formData.role,
+        phone: formData.phone,
+        idNumber: formData.idNumber,
+        department: formData.department,
+      });
+      await loadStaff();
       setIsAddDialogOpen(false);
       resetForm();
-    toast.success("Staff member added successfully!");
+      toast.success("Staff member added successfully!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to add staff member");
+    }
   };
 
-  const handleEditStaff = () => {
+  const handleEditStaff = async () => {
     if (!selectedUser || !formData.firstName || !formData.lastName || !formData.email || !formData.phone || !formData.idNumber) {
       toast.error("Please fill in all required fields");
       return;
     }
-
-    const updatedStaff = staff.map(member =>
-      member.id === selectedUser.id
-        ? {
-            ...member,
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            email: formData.email,
-            role: formData.role,
-            phone: formData.phone,
-            idNumber: formData.idNumber,
-            department: formData.department,
-          }
-        : member
-    );
-
-    setStaff(updatedStaff);
+    try {
+      await adminService.updateStaff(selectedUser.id, {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        role: formData.role,
+        phone: formData.phone,
+        idNumber: formData.idNumber,
+        department: formData.department,
+      });
+      await loadStaff();
       setIsEditDialogOpen(false);
       setSelectedUser(null);
       resetForm();
-    toast.success("Staff member updated successfully!");
+      toast.success("Staff member updated successfully!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update staff member");
+    }
   };
 
-  const handleDeleteStaff = () => {
+  const handleDeleteStaff = async () => {
     if (!selectedUser) return;
-
-    setStaff(staff.filter(member => member.id !== selectedUser.id));
+    try {
+      await adminService.deleteStaff(selectedUser.id);
+      await loadStaff();
       setIsDeleteDialogOpen(false);
       setSelectedUser(null);
-    toast.success("Staff member deleted successfully!");
+      toast.success("Staff member deleted successfully!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete staff member");
+    }
   };
 
-  const toggleStaffStatus = (staffId: string) => {
-    setStaff(staff.map(member =>
-      member.id === staffId ? { ...member, isActive: !member.isActive } : member
-    ));
-    toast.success("Staff status updated!");
+  const toggleStaffStatus = async (staffId: string) => {
+    try {
+      const updated = await adminService.toggleStaffStatus(staffId);
+      setStaff(prev => prev.map(m => m.id === staffId ? { ...m, isActive: updated.isActive } : m));
+      toast.success("Staff status updated!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update staff status");
+    }
   };
 
   const resetForm = () => {
@@ -164,6 +134,47 @@ const UserManagement = () => {
       department: "",
     });
   };
+
+  const toStaffUser = (apiUser: StaffUserApi): StaffUser => ({
+    id: apiUser._id,
+    firstName: apiUser.firstName,
+    lastName: apiUser.lastName,
+    email: apiUser.email,
+    role: apiUser.role,
+    phone: apiUser.phone || "",
+    idNumber: apiUser.idNumber || "",
+    department: apiUser.department || "",
+    isActive: apiUser.isActive,
+    createdAt: apiUser.createdAt ? new Date(apiUser.createdAt).toISOString().split('T')[0] : '',
+    lastLogin: apiUser.lastLogin,
+  });
+
+  const loadStaff = async () => {
+    try {
+      const res = await adminService.getStaff({
+        search: searchTerm || undefined,
+        role: roleFilter !== "all" ? (roleFilter as UserRole) : undefined,
+        limit: 100,
+        sort: '-createdAt',
+      });
+      setStaff(res.items.map(toStaffUser));
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load staff");
+    }
+  };
+
+  useEffect(() => {
+    loadStaff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roleFilter]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      loadStaff();
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   const openEditDialog = (member: StaffUser) => {
     setSelectedUser(member);
@@ -310,6 +321,7 @@ const UserManagement = () => {
                     <SelectContent>
                       <SelectItem value="receptionist">Receptionist</SelectItem>
                       <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                      <SelectItem value="guest">Guest</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -349,10 +361,11 @@ const UserManagement = () => {
                   <SelectValue placeholder="Filter by role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Roles</SelectItem>
+                  <SelectItem value="all">All Roles (Staff)</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="receptionist">Receptionist</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="guest">Guest</SelectItem>
                 </SelectContent>
               </Select>
             </div>

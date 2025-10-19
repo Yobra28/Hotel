@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,10 +19,8 @@ import { Layout } from "@/components/Layout";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import poolService, { type SwimmingActivity as BackendSwimmingActivity, type PoolFacility as BackendPoolFacility, type PoolBooking as BackendPoolBooking } from "@/services/poolService";
 import { 
-  mockPoolFacilities, 
-  mockSwimmingActivities, 
-  mockPoolReservations,
   mockPoolEquipment,
   PoolFacility, 
   SwimmingActivity,
@@ -35,10 +33,10 @@ import {
 
 const SwimmingActivities = () => {
   const { user } = useAuth();
-  const [poolFacilities, setPoolFacilities] = useState<PoolFacility[]>(mockPoolFacilities);
-  const [swimmingActivities, setSwimmingActivities] = useState<SwimmingActivity[]>(mockSwimmingActivities);
-  const [poolReservations, setPoolReservations] = useState<PoolReservation[]>(mockPoolReservations);
-  const [poolEquipment, setPoolEquipment] = useState<PoolEquipment[]>(mockPoolEquipment);
+  const [poolFacilities, setPoolFacilities] = useState<PoolFacility[]>([]);
+  const [swimmingActivities, setSwimmingActivities] = useState<SwimmingActivity[]>([]);
+  const [poolReservations, setPoolReservations] = useState<PoolReservation[]>([]);
+  const [poolEquipment, setPoolEquipment] = useState<PoolEquipment[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedActivityType, setSelectedActivityType] = useState<ActivityType | "all">("all");
   const [selectedReservationStatus, setSelectedReservationStatus] = useState<ReservationStatus | "all">("all");
@@ -72,6 +70,43 @@ const SwimmingActivities = () => {
   // Reservation Management
   const [deletingReservation, setDeletingReservation] = useState<PoolReservation | null>(null);
   const [isReservationDeleteOpen, setIsReservationDeleteOpen] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [pools, activities, equipment, myBookings] = await Promise.all([
+          poolService.getTransformedPools(),
+          poolService.getTransformedActivities(),
+          poolService.getTransformedEquipment(),
+          poolService.getMyPoolBookings().catch(() => []),
+        ]);
+        setPoolFacilities(pools as PoolFacility[]);
+        setSwimmingActivities(activities as SwimmingActivity[]);
+        setPoolEquipment(equipment as PoolEquipment[]);
+        // Transform backend bookings to UI reservations
+        const reservations: PoolReservation[] = (myBookings as BackendPoolBooking[]).map((b) => ({
+          id: b._id,
+          guestId: b.guest,
+          poolId: b.poolId,
+          activityId: b.activityId,
+          reservationType: b.activityId ? 'activity' : 'pool-access',
+          date: (b.bookingDate as any as string).slice(0,10),
+          timeSlot: { start: b.startTime || '', end: b.endTime || '' },
+          participants: b.numberOfParticipants,
+          status: (b.status as any),
+          totalAmount: b.totalAmount,
+          paymentStatus: 'paid',
+          createdAt: (b.createdAt as any as string),
+          updatedAt: (b.updatedAt as any as string),
+        }));
+        setPoolReservations(reservations);
+      } catch (e) {
+        console.error('Failed to load swimming data', e);
+        toast.error('Failed to load swimming data');
+      }
+    };
+    load();
+  }, []);
 
   const filteredActivities = swimmingActivities.filter(activity => {
     const matchesSearch = activity.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -117,39 +152,62 @@ const SwimmingActivities = () => {
     );
   };
 
-  const handleUpdateReservationStatus = (reservationId: string, newStatus: ReservationStatus) => {
-    setPoolReservations(prev => prev.map(reservation => 
-      reservation.id === reservationId 
-        ? { ...reservation, status: newStatus, updatedAt: new Date().toISOString() }
-        : reservation
-    ));
-    toast.success(`Reservation status updated to ${newStatus}`);
+  const handleUpdateReservationStatus = async (reservationId: string, newStatus: ReservationStatus) => {
+    try {
+      if (newStatus === 'cancelled') {
+        const updated = await poolService.cancelPoolBooking(reservationId);
+        setPoolReservations(prev => prev.map(res => res.id === reservationId ? {
+          ...res,
+          status: 'cancelled',
+          updatedAt: new Date().toISOString(),
+        } : res));
+      } else {
+        // No backend endpoint for other status changes yet; update locally
+        setPoolReservations(prev => prev.map(reservation => 
+          reservation.id === reservationId 
+            ? { ...reservation, status: newStatus, updatedAt: new Date().toISOString() }
+            : reservation
+        ));
+      }
+      toast.success(`Reservation status updated to ${newStatus}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update reservation');
+    }
   };
 
-  const handleCreateReservation = (formData: FormData) => {
-    const newReservation: PoolReservation = {
-      id: Date.now().toString(),
-      guestId: formData.get("guestId") as string,
-      poolId: formData.get("poolId") as string,
-      activityId: formData.get("activityId") as string || undefined,
-      reservationType: formData.get("reservationType") as "pool-access" | "activity" | "private-event" | "lane-swimming",
-      date: formData.get("date") as string,
-      timeSlot: {
-        start: formData.get("startTime") as string,
-        end: formData.get("endTime") as string
-      },
-      participants: parseInt(formData.get("participants") as string),
-      status: "confirmed",
-      totalAmount: parseInt(formData.get("totalAmount") as string) || 0,
-      paymentStatus: "pending",
-      specialRequests: formData.get("specialRequests") as string,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    setPoolReservations(prev => [...prev, newReservation]);
-    toast.success("Reservation created successfully");
-    setIsNewReservationOpen(false);
+  const handleCreateReservation = async (formData: FormData) => {
+    try {
+      const payload = {
+        poolId: formData.get("poolId") as string,
+        activityId: (formData.get("activityId") as string) || undefined,
+        bookingDate: formData.get("date") as string,
+        startTime: formData.get("startTime") as string,
+        endTime: formData.get("endTime") as string,
+        numberOfParticipants: parseInt(formData.get("participants") as string),
+        specialRequests: (formData.get("specialRequests") as string) || undefined,
+      };
+      const created = await poolService.createPoolBooking(payload as any);
+      const newReservation: PoolReservation = {
+        id: created._id,
+        guestId: created.guest,
+        poolId: created.poolId,
+        activityId: created.activityId,
+        reservationType: created.activityId ? 'activity' : 'pool-access',
+        date: (created.bookingDate as any as string).slice(0,10),
+        timeSlot: { start: created.startTime || '', end: created.endTime || '' },
+        participants: created.numberOfParticipants,
+        status: created.status as any,
+        totalAmount: created.totalAmount,
+        paymentStatus: 'pending',
+        createdAt: (created.createdAt as any as string),
+        updatedAt: (created.updatedAt as any as string),
+      };
+      setPoolReservations(prev => [newReservation, ...prev]);
+      toast.success("Reservation created successfully");
+      setIsNewReservationOpen(false);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to create reservation');
+    }
   };
 
   // Pool Management Functions
@@ -226,11 +284,15 @@ const SwimmingActivities = () => {
     setEditingEquipment(null);
   };
 
-  const handleDeleteEquipment = () => {
+  const handleDeleteEquipment = async () => {
     if (!deletingEquipment) return;
-    
-    setPoolEquipment(prev => prev.filter(equipment => equipment.id !== deletingEquipment.id));
-    toast.success("Equipment deleted successfully");
+    try {
+      await poolService.deleteEquipment(deletingEquipment.id);
+      setPoolEquipment(prev => prev.filter(equipment => equipment.id !== deletingEquipment.id));
+      toast.success("Equipment deleted successfully");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete equipment');
+    }
     setIsEquipmentDeleteOpen(false);
     setDeletingEquipment(null);
   };
@@ -352,7 +414,41 @@ const SwimmingActivities = () => {
                           </DialogDescription>
                         </DialogHeader>
                         {/* Pool Form */}
-                        <form action={handleSavePool} className="space-y-4">
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            const fd = new FormData(e.currentTarget as HTMLFormElement);
+                            // Build minimal payload per request
+                            const payload: any = {
+                              name: fd.get('name') as string,
+                              type: fd.get('type') as string,
+                              depth: {
+                                min: parseFloat(fd.get('minDepth') as string),
+                                max: parseFloat(fd.get('maxDepth') as string),
+                              },
+                              operatingHours: {
+                                open: fd.get('openTime') as string,
+                                close: fd.get('closeTime') as string,
+                              },
+                            };
+                            try {
+                              if (editingPool) {
+                                const updated = await poolService.updatePoolFacility(editingPool.id, payload);
+                                setPoolFacilities(prev => prev.map(p => p.id === editingPool.id ? updated : p));
+                                toast.success('Pool updated successfully');
+                              } else {
+                                const created = await poolService.createPoolFacility(payload);
+                                setPoolFacilities(prev => [created, ...prev]);
+                                toast.success('Pool added successfully');
+                              }
+                              setIsNewPoolOpen(false);
+                              setEditingPool(null);
+                            } catch (err: any) {
+                              toast.error(err.message || 'Failed to save pool');
+                            }
+                          }}
+                          className="space-y-4"
+                        >
                           <div>
                             <Label htmlFor="name">Pool Name</Label>
                             <Input id="name" name="name" defaultValue={editingPool?.name} required />
@@ -374,16 +470,6 @@ const SwimmingActivities = () => {
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div>
-                              <Label htmlFor="capacity">Capacity</Label>
-                              <Input id="capacity" name="capacity" type="number" defaultValue={editingPool?.capacity} required />
-                            </div>
-                            <div>
-                              <Label htmlFor="temperature">Temperature (°C)</Label>
-                              <Input id="temperature" name="temperature" type="number" defaultValue={editingPool?.temperature} required />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
                               <Label htmlFor="minDepth">Min Depth (m)</Label>
                               <Input id="minDepth" name="minDepth" type="number" step="0.1" defaultValue={editingPool?.depth.min} required />
                             </div>
@@ -401,24 +487,6 @@ const SwimmingActivities = () => {
                               <Label htmlFor="closeTime">Close Time</Label>
                               <Input id="closeTime" name="closeTime" type="time" defaultValue={editingPool?.operatingHours.close} required />
                             </div>
-                          </div>
-                          <div>
-                            <Label htmlFor="status">Status</Label>
-                            <Select name="status" defaultValue={editingPool?.status}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select status" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="open">Open</SelectItem>
-                                <SelectItem value="closed">Closed</SelectItem>
-                                <SelectItem value="maintenance">Maintenance</SelectItem>
-                                <SelectItem value="private-event">Private Event</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="amenities">Amenities (comma separated)</Label>
-                            <Input id="amenities" name="amenities" defaultValue={editingPool?.amenities.join(", ")} />
                           </div>
                           <div className="flex justify-end space-x-2">
                             <Button type="button" variant="outline" onClick={() => { setIsNewPoolOpen(false); setEditingPool(null); }}>Cancel</Button>
@@ -544,7 +612,41 @@ const SwimmingActivities = () => {
                             {editingActivity ? "Update swimming activity details" : "Create a new swimming activity or class"}
                           </DialogDescription>
                         </DialogHeader>
-                        <form action={handleSaveActivity} className="space-y-4">
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            const fd = new FormData(e.currentTarget as HTMLFormElement);
+                            const payload: any = {
+                              name: fd.get('activityName') as string,
+                              description: fd.get('activityDescription') as string,
+                              type: fd.get('activityType') as string,
+                              instructor: (fd.get('instructor') as string) || undefined,
+                              capacity: parseInt(fd.get('activityCapacity') as string),
+                              price: parseInt(fd.get('activityPrice') as string),
+                              duration: parseInt(fd.get('duration') as string),
+                              skillLevel: fd.get('skillLevel') as string,
+                              isActive: !!fd.get('isActive'),
+                              nextSession: fd.get('nextSession') as string,
+                              poolId: fd.get('activityPoolId') as string,
+                            };
+                            try {
+                              if (editingActivity) {
+                                const updated = await poolService.updateSwimmingActivity(editingActivity.id, payload);
+                                setSwimmingActivities(prev => prev.map(a => a.id === editingActivity.id ? updated : a));
+                                toast.success('Activity updated successfully');
+                              } else {
+                                const created = await poolService.createSwimmingActivity(payload);
+                                setSwimmingActivities(prev => [created, ...prev]);
+                                toast.success('Activity added successfully');
+                              }
+                              setIsNewActivityOpen(false);
+                              setEditingActivity(null);
+                            } catch (err: any) {
+                              toast.error(err.message || 'Failed to save activity');
+                            }
+                          }}
+                          className="space-y-4"
+                        >
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <Label htmlFor="activityName">Activity Name</Label>
@@ -735,7 +837,15 @@ const SwimmingActivities = () => {
                                     {activity.isActive ? '🔴' : '🟢'} 
                                     {activity.isActive ? 'Deactivate' : 'Activate'}
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => { setDeletingActivity(activity); setIsActivityDeleteOpen(true); }} className="text-red-600 focus:text-red-600">
+                                  <DropdownMenuItem onClick={async () => {
+                                    try {
+                                      await poolService.deleteSwimmingActivity(activity.id);
+                                      setSwimmingActivities(prev => prev.filter(a => a.id !== activity.id));
+                                      toast.success('Activity deleted');
+                                    } catch (err: any) {
+                                      toast.error(err.message || 'Failed to delete');
+                                    }
+                                  }} className="text-red-600 focus:text-red-600">
                                     <Trash2 className="mr-2 h-4 w-4" />
                                     Delete Activity
                                   </DropdownMenuItem>
@@ -1036,7 +1146,39 @@ const SwimmingActivities = () => {
                             {editingEquipment ? "Update equipment details" : "Add new equipment to the inventory"}
                           </DialogDescription>
                         </DialogHeader>
-                        <form action={handleSaveEquipment} className="space-y-4">
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            const fd = new FormData(e.currentTarget as HTMLFormElement);
+                            const payload: any = {
+                              name: fd.get('name') as string,
+                              type: fd.get('type') as string,
+                              totalQuantity: parseInt(fd.get('totalQuantity') as string),
+                              availableQuantity: parseInt(fd.get('availableQuantity') as string),
+                              dailyRate: parseInt(fd.get('dailyRate') as string),
+                              condition: fd.get('condition') as string,
+                              isAvailable: !!fd.get('isAvailable'),
+                              lastMaintenance: fd.get('lastMaintenance') as string,
+                              description: (fd.get('description') as string) || '',
+                            };
+                            try {
+                              if (editingEquipment) {
+                                const updated = await poolService.updateEquipment(editingEquipment.id, payload);
+                                setPoolEquipment(prev => prev.map(eq => eq.id === editingEquipment.id ? updated : eq));
+                                toast.success('Equipment updated successfully');
+                              } else {
+                                const created = await poolService.createEquipment(payload);
+                                setPoolEquipment(prev => [created, ...prev]);
+                                toast.success('Equipment added successfully');
+                              }
+                              setIsNewEquipmentOpen(false);
+                              setEditingEquipment(null);
+                            } catch (err: any) {
+                              toast.error(err.message || 'Failed to save equipment');
+                            }
+                          }}
+                          className="space-y-4"
+                        >
                           <div>
                             <Label htmlFor="equipName">Equipment Name</Label>
                             <Input id="equipName" name="name" defaultValue={editingEquipment?.name} required />

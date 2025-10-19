@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,18 +8,22 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { mockRooms, RoomStatus, RoomType, Room } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
 import { Search, Grid, List, Plus, Edit, Trash2, Eye, Bed } from "lucide-react";
 import { toast } from "sonner";
+import roomService from "@/services/roomService";
+
+type RoomStatus = 'available' | 'occupied' | 'cleaning' | 'maintenance' | 'out-of-order';
+type RoomType = 'Smart Economy' | 'Business Suite' | 'Premium Deluxe' | 'Presidential';
 
 const Rooms = () => {
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<RoomStatus | "all">("all");
-  const [rooms, setRooms] = useState<Room[]>(mockRooms);
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -27,12 +31,30 @@ const Rooms = () => {
   
   const [formData, setFormData] = useState({
     number: "",
-    type: "single" as RoomType,
+    type: "Smart Economy" as RoomType,
     status: "available" as RoomStatus,
     price: "",
     floor: "",
     capacity: "",
   });
+
+  // Load rooms on component mount
+  useEffect(() => {
+    loadRooms();
+  }, []);
+
+  const loadRooms = async () => {
+    try {
+      setLoading(true);
+      const roomsData = await roomService.getTransformedRooms();
+      setRooms(roomsData);
+    } catch (error) {
+      console.error('Error loading rooms:', error);
+      toast.error('Failed to load rooms');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredRooms = rooms.filter((room) => {
     const matchesSearch = room.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -41,62 +63,74 @@ const Rooms = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const handleAddRoom = () => {
+  const handleAddRoom = async () => {
     if (!formData.number || !formData.price || !formData.floor || !formData.capacity) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const newRoom: Room = {
-      id: Date.now().toString(),
-      number: formData.number,
-      type: formData.type,
-      status: formData.status,
-      price: parseInt(formData.price),
-      floor: parseInt(formData.floor),
-      capacity: parseInt(formData.capacity),
-    };
+    try {
+      const roomData = {
+        number: formData.number,
+        type: formData.type,
+        status: formData.status,
+        price: parseInt(formData.price),
+        floor: parseInt(formData.floor),
+        capacity: parseInt(formData.capacity),
+      };
 
-    setRooms([...rooms, newRoom]);
-    setIsAddDialogOpen(false);
-    resetForm();
-    toast.success("Room added successfully!");
+      await roomService.createRoom(roomData);
+      await loadRooms(); // Refresh the data
+      setIsAddDialogOpen(false);
+      resetForm();
+      toast.success("Room added successfully!");
+    } catch (error: any) {
+      console.error('Error creating room:', error);
+      toast.error(error.message || 'Failed to create room');
+    }
   };
 
-  const handleEditRoom = () => {
+  const handleEditRoom = async () => {
     if (!selectedRoom || !formData.number || !formData.price || !formData.floor || !formData.capacity) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const updatedRooms = rooms.map(room =>
-      room.id === selectedRoom.id
-        ? {
-            ...room,
-            number: formData.number,
-            type: formData.type,
-            status: formData.status,
-            price: parseInt(formData.price),
-            floor: parseInt(formData.floor),
-            capacity: parseInt(formData.capacity),
-          }
-        : room
-    );
+    try {
+      const roomData = {
+        number: formData.number,
+        type: formData.type,
+        status: formData.status,
+        price: parseInt(formData.price),
+        floor: parseInt(formData.floor),
+        capacity: parseInt(formData.capacity),
+      };
 
-    setRooms(updatedRooms);
-    setIsEditDialogOpen(false);
-    setSelectedRoom(null);
-    resetForm();
-    toast.success("Room updated successfully!");
+      await roomService.updateRoom(selectedRoom.id, roomData);
+      await loadRooms(); // Refresh the data
+      setIsEditDialogOpen(false);
+      setSelectedRoom(null);
+      resetForm();
+      toast.success("Room updated successfully!");
+    } catch (error: any) {
+      console.error('Error updating room:', error);
+      toast.error(error.message || 'Failed to update room');
+    }
   };
 
-  const handleDeleteRoom = () => {
+  const handleDeleteRoom = async () => {
     if (!selectedRoom) return;
 
-    setRooms(rooms.filter(room => room.id !== selectedRoom.id));
-    setIsDeleteDialogOpen(false);
-    setSelectedRoom(null);
-    toast.success("Room deleted successfully!");
+    try {
+      await roomService.deleteRoom(selectedRoom.id);
+      await loadRooms(); // Refresh the data
+      setIsDeleteDialogOpen(false);
+      setSelectedRoom(null);
+      toast.success("Room deleted successfully!");
+    } catch (error: any) {
+      console.error('Error deleting room:', error);
+      toast.error(error.message || 'Failed to delete room');
+    }
   };
 
   const resetForm = () => {
@@ -110,7 +144,7 @@ const Rooms = () => {
     });
   };
 
-  const openEditDialog = (room: Room) => {
+  const openEditDialog = (room: any) => {
     setSelectedRoom(room);
     setFormData({
       number: room.number,
@@ -123,12 +157,12 @@ const Rooms = () => {
     setIsEditDialogOpen(true);
   };
 
-  const openDeleteDialog = (room: Room) => {
+  const openDeleteDialog = (room: any) => {
     setSelectedRoom(room);
     setIsDeleteDialogOpen(true);
   };
 
-  const openViewDialog = (room: Room) => {
+  const openViewDialog = (room: any) => {
     setSelectedRoom(room);
     setIsViewDialogOpen(true);
   };
@@ -183,11 +217,11 @@ const Rooms = () => {
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="single">Single</SelectItem>
-                        <SelectItem value="double">Double</SelectItem>
-                        <SelectItem value="suite">Suite</SelectItem>
-                        <SelectItem value="deluxe">Deluxe</SelectItem>
+                    <SelectContent>
+                        <SelectItem value="Smart Economy">Smart Economy</SelectItem>
+                        <SelectItem value="Business Suite">Business Suite</SelectItem>
+                        <SelectItem value="Premium Deluxe">Premium Deluxe</SelectItem>
+                        <SelectItem value="Presidential">Presidential</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -304,7 +338,7 @@ const Rooms = () => {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Capacity:</span>
-                        <span className="font-medium">{room.capacity} guests</span>
+                        <span className="font-medium">{room.adults} adults{room.children ? `, ${room.children} child${room.children>1?'ren':''}` : ''}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Price:</span>
@@ -366,7 +400,7 @@ const Rooms = () => {
                       <div className="flex items-center gap-8">
                         <div className="text-right">
                           <p className="text-sm text-muted-foreground">Floor {room.floor}</p>
-                          <p className="text-sm text-muted-foreground">{room.capacity} guests</p>
+                          <p className="text-sm text-muted-foreground">{room.adults} adults{room.children ? `, ${room.children} child${room.children>1?'ren':''}` : ''}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-lg font-bold text-primary">KES {room.price}</p>
@@ -509,11 +543,11 @@ const Rooms = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-muted-foreground">Room Type</Label>
-                    <p className="text-lg font-semibold capitalize">{selectedRoom.type}</p>
+                    <p className="text-lg font-semibold">{selectedRoom.type}</p>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-muted-foreground">Capacity</Label>
-                    <p className="text-lg font-semibold">{selectedRoom.capacity} guests</p>
+                    <p className="text-lg font-semibold">{selectedRoom.adults} adults{selectedRoom.children ? `, ${selectedRoom.children} child${selectedRoom.children>1?'ren':''}` : ''}</p>
                   </div>
                 </div>
                 <div className="space-y-2">

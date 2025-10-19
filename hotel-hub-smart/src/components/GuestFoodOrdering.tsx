@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Plus, Minus, ShoppingCart, Clock, DollarSign } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { mockMenuItems, MenuItem, MenuCategory } from "@/data/mockData";
+import menuService from "@/services/menuService";
+
+type MenuCategory = 'appetizers' | 'mains' | 'desserts' | 'beverages';
+
+interface MenuItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: MenuCategory;
+  preparationTime: number;
+  isAvailable: boolean;
+  allergens: string[];
+  dietaryRestrictions: string[];
+}
 
 interface CartItem extends MenuItem {
   quantity: number;
@@ -19,11 +33,31 @@ interface CartItem extends MenuItem {
 
 const GuestFoodOrdering = () => {
   const { user } = useAuth();
-  const [menuItems] = useState<MenuItem[]>(mockMenuItems.filter(item => item.isAvailable));
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<MenuCategory | "all">("all");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [orderType, setOrderType] = useState<"room-service" | "takeaway">("room-service");
+  const [loading, setLoading] = useState(true);
+
+  // Load menu items on component mount
+  useEffect(() => {
+    loadMenuItems();
+  }, []);
+
+  // Load menu items from API
+  const loadMenuItems = async () => {
+    try {
+      setLoading(true);
+      const items = await menuService.getTransformedMenuItems();
+      setMenuItems(items.filter(item => item.isAvailable));
+    } catch (error) {
+      console.error('Error loading menu items:', error);
+      toast.error('Failed to load menu items');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredMenuItems = menuItems.filter(item => {
     return selectedCategory === "all" || item.category === selectedCategory;
@@ -69,16 +103,32 @@ const GuestFoodOrdering = () => {
     return cart.reduce((total, item) => total + item.quantity, 0);
   };
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (cart.length === 0) {
       toast.error("Your cart is empty");
       return;
     }
 
-    // In a real app, this would make an API call to create the order
-    toast.success("Order placed successfully! You'll receive a confirmation shortly.");
-    setCart([]);
-    setIsCheckoutOpen(false);
+    try {
+      const orderData = {
+        items: cart.map(item => ({
+          menuItemId: item.id,
+          quantity: item.quantity,
+          specialInstructions: item.specialInstructions
+        })),
+        orderType: orderType as 'room-service' | 'takeaway',
+        deliveryLocation: orderType === 'room-service' ? 'Room' : undefined,
+        specialInstructions: 'Guest order from mobile app'
+      };
+
+      await menuService.createOrder(orderData);
+      toast.success("Order placed successfully! You'll receive a confirmation shortly.");
+      setCart([]);
+      setIsCheckoutOpen(false);
+    } catch (error: any) {
+      console.error('Error placing order:', error);
+      toast.error(error.message || 'Failed to place order');
+    }
   };
 
   return (
@@ -223,8 +273,26 @@ const GuestFoodOrdering = () => {
       </div>
 
       {/* Menu Items */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {filteredMenuItems.map((item) => (
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <CardHeader className="pb-3">
+                <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                <div className="h-4 bg-gray-200 rounded w-full mt-2"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+                  <div className="h-8 bg-gray-200 rounded w-full"></div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : filteredMenuItems.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {filteredMenuItems.map((item) => (
           <Card key={item.id} className="hover:shadow-md transition-shadow">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
@@ -273,9 +341,17 @@ const GuestFoodOrdering = () => {
                 </Button>
               </div>
             </CardContent>
-          </Card>
-        ))}
-      </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground text-lg mb-4">No menu items available at the moment</p>
+          <Button onClick={loadMenuItems} variant="outline">
+            Refresh Menu
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

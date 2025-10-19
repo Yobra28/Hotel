@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 
 const Register = () => {
-  const { register, isLoading } = useAuth();
+  const { register, isLoading, error } = useAuth();
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -50,8 +50,12 @@ const Register = () => {
       toast.error("Password is required");
       return false;
     }
-    if (formData.password.length < 8) {
-      toast.error("Password must be at least 8 characters long");
+    if (formData.password.length < 6) {
+      toast.error("Password must be at least 6 characters long");
+      return false;
+    }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
+      toast.error("Password must contain at least one lowercase letter, one uppercase letter, and one number");
       return false;
     }
     if (formData.password !== formData.confirmPassword) {
@@ -60,6 +64,11 @@ const Register = () => {
     }
     if (!formData.phone.trim()) {
       toast.error("Phone number is required");
+      return false;
+    }
+    // Check phone format (should be international format without spaces)
+    if (!/^\+[1-9]\d{10,14}$/.test(formData.phone.replace(/\s/g, ''))) {
+      toast.error("Phone number must be in international format (e.g., +254712345678) without spaces");
       return false;
     }
     if (!formData.idNumber.trim()) {
@@ -91,8 +100,9 @@ const Register = () => {
       
       toast.success("Registration successful! Welcome to our hotel!");
       navigate("/guest-dashboard");
-    } catch (error) {
-      toast.error("Registration failed. Please try again.");
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      toast.error(error.message || "Registration failed. Please try again.");
     }
   };
 
@@ -109,6 +119,11 @@ const Register = () => {
           <CardDescription>Join our hotel system to manage your bookings and reservations</CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md text-sm mb-6">
+              {error}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Personal Information */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -154,11 +169,18 @@ const Register = () => {
                 <Input
                   id="phone"
                   type="tel"
-                  placeholder="+254 712 345 678"
+                  placeholder="+254712345678"
                   value={formData.phone}
-                  onChange={(e) => handleInputChange("phone", e.target.value)}
+                  onChange={(e) => {
+                    // Remove spaces automatically for better user experience
+                    const cleanPhone = e.target.value.replace(/\s/g, '');
+                    handleInputChange("phone", cleanPhone);
+                  }}
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  International format without spaces (e.g., +254712345678)
+                </p>
               </div>
             </div>
 
@@ -204,6 +226,9 @@ const Register = () => {
                     )}
                   </Button>
                 </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Password must be at least 6 characters with uppercase, lowercase, and number
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm Password</Label>

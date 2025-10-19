@@ -1,4 +1,5 @@
-import { useState } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,10 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { mockRooms, mockBookings, mockGuests } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
-import { Calendar, DollarSign, CreditCard, Search, Bed, Star, Clock, CheckCircle, User, Phone, Mail, MapPin } from "lucide-react";
+import { Calendar, DollarSign, CreditCard, Search, Bed, Star, Clock, CheckCircle, User, Phone, Mail, MapPin, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import roomService from "@/services/roomService";
+import bookingService from "@/services/bookingService";
 
 interface GuestBooking {
   id: string;
@@ -31,7 +33,14 @@ const GuestPortal = () => {
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [selectedBooking, setSelectedBooking] = useState<GuestBooking | null>(null);
-  
+
+  // API state
+  const [availableRooms, setAvailableRooms] = useState<any[]>([]);
+  const [guestBookings, setGuestBookings] = useState<any[]>([]);
+  const [loadingRooms, setLoadingRooms] = useState(true);
+  const [loadingBookings, setLoadingBookings] = useState(true);
+  const [bookingLoading, setBookingLoading] = useState(false);
+
   const [bookingData, setBookingData] = useState({
     checkIn: "",
     checkOut: "",
@@ -46,39 +55,125 @@ const GuestPortal = () => {
     method: "mpesa",
   });
 
-  // Get guest bookings (mock data - in real app, filter by guest ID)
-  const guestBookings = mockBookings.filter(booking => booking.guestId === "1");
+  // Load available rooms on component mount
+  useEffect(() => {
+    const loadAvailableRooms = async () => {
+      try {
+        setLoadingRooms(true);
+        console.log('Loading available rooms...');
+        const rooms = await roomService.getTransformedAvailableRooms();
+        console.log('Loaded rooms:', rooms);
+        setAvailableRooms(rooms);
+      } catch (error) {
+        console.error('Error loading rooms:', error);
+        toast.error('Failed to load available rooms');
+      } finally {
+        setLoadingRooms(false);
+      }
+    };
 
-  // Filter available rooms
-  const availableRooms = mockRooms.filter(room => 
-    room.status === "available" &&
+    loadAvailableRooms();
+  }, []);
+
+  // Load guest bookings on component mount
+  useEffect(() => {
+    const loadGuestBookings = async () => {
+      try {
+        setLoadingBookings(true);
+        const bookings = await bookingService.getTransformedMyBookings();
+        setGuestBookings(bookings);
+      } catch (error) {
+        console.error('Error loading bookings:', error);
+        toast.error('Failed to load your bookings');
+      } finally {
+        setLoadingBookings(false);
+      }
+    };
+
+    if (user) {
+      loadGuestBookings();
+    } else {
+      setLoadingBookings(false);
+    }
+  }, [user]);
+
+  // Filter available rooms based on search and type
+  const filteredRooms = availableRooms.filter(room =>
     (selectedRoomType === "all" || room.type === selectedRoomType) &&
     room.number.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleRoomBooking = () => {
+  const handleRoomBooking = async () => {
     if (!bookingData.checkIn || !bookingData.checkOut || !bookingData.guestName || !bookingData.guestEmail || !bookingData.guestPhone) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    // Simulate booking creation
-    const newBooking: GuestBooking = {
-      id: Date.now().toString(),
-      roomId: selectedRoom.id,
-      checkIn: bookingData.checkIn,
-      checkOut: bookingData.checkOut,
-      status: "confirmed",
-      totalAmount: selectedRoom.price * Math.ceil((new Date(bookingData.checkOut).getTime() - new Date(bookingData.checkIn).getTime()) / (1000 * 60 * 60 * 24)),
-      paidAmount: 0,
-      guestId: "1",
-    };
+    try {
+      setBookingLoading(true);
 
-    setIsBookingDialogOpen(false);
-    toast.success("Room booked successfully! Please proceed to payment.");
-    setSelectedBooking(newBooking);
-    setPaymentData({ ...paymentData, amount: newBooking.totalAmount.toString() });
-    setIsPaymentDialogOpen(true);
+      // Calculate number of nights
+      const checkInDate = new Date(bookingData.checkIn);
+      const checkOutDate = new Date(bookingData.checkOut);
+      const numberOfNights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      // Create booking data for API
+      const bookingDataForAPI = {
+        roomId: selectedRoom.id,
+        checkInDate: bookingData.checkIn,
+        checkOutDate: bookingData.checkOut,
+        numberOfGuests: {
+          adults: 1, // Default to 1 adult, can be made configurable later
+          children: 0
+        },
+        guestDetails: {
+          firstName: bookingData.guestName.split(' ')[0] || bookingData.guestName,
+          lastName: bookingData.guestName.split(' ').slice(1).join(' ') || '',
+          email: bookingData.guestEmail,
+          phone: bookingData.guestPhone,
+          idNumber: 'TEMP-' + Date.now(), // Temporary ID, should be collected from user
+          nationality: 'Kenyan' // Default, can be made configurable
+        },
+        source: 'website'
+      };
+
+      // Create booking via API
+      const newBooking = await bookingService.createBooking(bookingDataForAPI);
+
+      setIsBookingDialogOpen(false);
+      toast.success("Room booked successfully! Please proceed to payment.");
+
+      // Transform the API response to match our local format
+      const transformedBooking: GuestBooking = {
+        id: newBooking._id,
+        roomId: newBooking.room,
+        checkIn: newBooking.checkInDate.toISOString().split('T')[0],
+        checkOut: newBooking.checkOutDate.toISOString().split('T')[0],
+        status: newBooking.status === 'confirmed' ? 'confirmed' :
+                newBooking.status === 'checked_in' ? 'checked-in' :
+                newBooking.status === 'checked_out' ? 'checked-out' :
+                newBooking.status === 'cancelled' ? 'cancelled' : 'confirmed',
+        totalAmount: newBooking.pricing.totalAmount,
+        paidAmount: newBooking.payments.reduce((total, payment) => {
+          return payment.status === 'completed' ? total + payment.amount : total;
+        }, 0),
+        guestId: newBooking.guest
+      };
+
+      setSelectedBooking(transformedBooking);
+      setPaymentData({ ...paymentData, amount: transformedBooking.totalAmount.toString() });
+      setIsPaymentDialogOpen(true);
+
+      // Refresh bookings list
+      const updatedBookings = await bookingService.getTransformedMyBookings();
+      setGuestBookings(updatedBookings);
+
+    } catch (error: any) {
+      console.error('Error creating booking:', error);
+      toast.error(error.response?.data?.error?.message || 'Failed to create booking. Please try again.');
+    } finally {
+      setBookingLoading(false);
+    }
   };
 
   const handlePayment = async () => {
@@ -202,7 +297,17 @@ const GuestPortal = () => {
 
               {/* Room Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {availableRooms.map((room) => (
+                {loadingRooms ? (
+                  <div className="col-span-full flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin mr-2" />
+                    <span>Loading available rooms...</span>
+                  </div>
+                ) : filteredRooms.length === 0 ? (
+                  <div className="col-span-full text-center py-12">
+                    <p className="text-muted-foreground">No rooms available matching your criteria.</p>
+                  </div>
+                ) : (
+                  filteredRooms.map((room) => (
                   <Card key={room.id} className="hover:shadow-lg transition-all duration-300">
                     <CardHeader>
                       <div className="flex items-start justify-between">
@@ -298,7 +403,16 @@ const GuestPortal = () => {
                                 />
                               </div>
                               <div className="flex gap-2 pt-4">
-                                <Button onClick={handleRoomBooking} className="flex-1">Confirm Booking</Button>
+                              <Button onClick={handleRoomBooking} className="flex-1" disabled={bookingLoading}>
+                                {bookingLoading ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    Creating Booking...
+                                  </>
+                                ) : (
+                                  'Confirm Booking'
+                                )}
+                              </Button>
                                 <Button variant="outline" onClick={() => setIsBookingDialogOpen(false)}>Cancel</Button>
                               </div>
                             </div>
@@ -307,7 +421,8 @@ const GuestPortal = () => {
                       </div>
             </CardContent>
           </Card>
-                ))}
+                  ))
+                )}
               </div>
               </div>
         </div>
@@ -324,15 +439,20 @@ const GuestPortal = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {guestBookings.length > 0 ? (
+                  {loadingBookings ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                      <span>Loading your bookings...</span>
+                    </div>
+                  ) : guestBookings.length > 0 ? (
                     guestBookings.map((booking) => {
-                      const room = mockRooms.find(r => r.id === booking.roomId);
+                      const room = availableRooms.find(r => r.id === booking.roomId);
                       return (
                         <div key={booking.id} className="border rounded-lg p-3">
                           <div className="flex items-start justify-between mb-2">
                   <div>
-                              <p className="font-semibold">Room {room?.number}</p>
-                              <p className="text-sm text-muted-foreground capitalize">{room?.type}</p>
+                              <p className="font-semibold">Room {room?.number || booking.roomId}</p>
+                              <p className="text-sm text-muted-foreground capitalize">{room?.type || 'Room'}</p>
                   </div>
                             {getBookingStatusBadge(booking.status)}
                   </div>

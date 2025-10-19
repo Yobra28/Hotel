@@ -16,24 +16,18 @@ import { Search, Plus, Clock, Users, DollarSign, ChefHat, Filter, Trash2, Eye, E
 import { Layout } from "@/components/Layout";
 import { useAuth } from "@/contexts/AuthContext";
 import LocationBasedFoodManagement from "@/components/LocationBasedFoodManagement";
-import { 
-  mockMenuItems, 
-  mockFoodOrders, 
-  MenuItem, 
-  FoodOrder, 
-  MenuCategory,
-  OrderStatus,
-  DietaryRestriction 
-} from "@/data/mockData";
-import { mockGuests, mockHotelLocations, Guest } from "@/data/mockData";
+import menuService from "@/services/menuService";
+import guestService from "@/services/guestService";
 
 const FoodOrdering = () => {
   const { user } = useAuth();
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(mockMenuItems);
-  const [foodOrders, setFoodOrders] = useState<FoodOrder[]>(mockFoodOrders);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [foodOrders, setFoodOrders] = useState<any[]>([]);
+  const [guests, setGuests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<MenuCategory | "all">("all");
-  const [selectedOrderStatus, setSelectedOrderStatus] = useState<OrderStatus | "all">("all");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedOrderStatus, setSelectedOrderStatus] = useState<string>("all");
   const [isNewMenuItemOpen, setIsNewMenuItemOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [viewingItem, setViewingItem] = useState<MenuItem | null>(null);
@@ -47,8 +41,30 @@ const FoodOrdering = () => {
   const [createOrderCart, setCreateOrderCart] = useState<CreateCartItem[]>([]);
   const [selectedGuestId, setSelectedGuestId] = useState<string>("");
   const [createOrderType, setCreateOrderType] = useState<"dine-in" | "room-service" | "takeaway" | "poolside" | "spa">("room-service");
-  const [selectedLocationId, setSelectedLocationId] = useState<string>(mockHotelLocations[0]?.id || "");
+  const [selectedLocationId, setSelectedLocationId] = useState<string>("");
   const [menuSearchForCreate, setMenuSearchForCreate] = useState("");
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const [itemsData, guestsData] = await Promise.all([
+          menuService.getTransformedMenuItems(),
+          guestService.getTransformedGuests(),
+        ]);
+        // Add foodorders API here once available, for now mock empty
+        setMenuItems(itemsData);
+        setGuests(guestsData);
+        setFoodOrders([]);
+      } catch (e) {
+        console.error('Failed to load food data', e);
+        toast.error('Failed to load food data');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
 
   const filteredMenuItems = menuItems.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -68,18 +84,7 @@ const FoodOrdering = () => {
   ));
 
   const getDefaultLocationIdForType = (orderType: typeof createOrderType) => {
-    switch (orderType) {
-      case "room-service":
-        return mockHotelLocations.find(l => l.type === "room")?.id || mockHotelLocations[0]?.id || "";
-      case "poolside":
-        return mockHotelLocations.find(l => l.type === "pool")?.id || mockHotelLocations[0]?.id || "";
-      case "spa":
-        return mockHotelLocations.find(l => l.type === "spa")?.id || mockHotelLocations[0]?.id || "";
-      case "dine-in":
-      case "takeaway":
-      default:
-        return mockHotelLocations.find(l => l.type === "restaurant")?.id || mockHotelLocations[0]?.id || "";
-    }
+    return "restaurant"; // simplified
   };
 
   const addItemToCreateCart = (item: MenuItem) => {
@@ -104,9 +109,9 @@ const FoodOrdering = () => {
   };
 
   const getCreateOrderSubtotal = () => createOrderCart.reduce((sum, ci) => sum + ci.price * ci.quantity, 0);
-  const getSelectedLocation = () => mockHotelLocations.find(l => l.id === selectedLocationId);
+  const getSelectedLocation = () => ({ name: 'Main Restaurant', deliveryFee: 0 }); // simplified
 
-  const handleCreateOrder = () => {
+  const handleCreateOrder = async () => {
     if (!selectedGuestId) {
       toast.error("Please select a guest");
       return;
@@ -115,44 +120,34 @@ const FoodOrdering = () => {
       toast.error("Please add at least one menu item");
       return;
     }
-    const location = getSelectedLocation();
-    if (!location) {
-      toast.error("Please select a delivery location");
-      return;
+
+    try {
+      const order = await menuService.createOrder({
+        items: createOrderCart.map(ci => ({ menuItemId: ci.id, quantity: ci.quantity, specialInstructions: ci.specialInstructions })),
+        orderType: createOrderType,
+        deliveryLocation: selectedLocationId,
+        guestId: selectedGuestId,
+      });
+      setFoodOrders(prev => [{
+        id: (order as any)._id,
+        guestId: selectedGuestId,
+        items: createOrderCart,
+        totalAmount: order.totalAmount,
+        orderType: createOrderType,
+        status: order.status,
+        orderTime: new Date().toISOString(),
+      }, ...prev]);
+      toast.success("Order created successfully");
+
+      setIsCreateOrderOpen(false);
+      setCreateOrderCart([]);
+      setSelectedGuestId("");
+      setCreateOrderType("room-service");
+      setSelectedLocationId(getDefaultLocationIdForType("room-service"));
+      setMenuSearchForCreate("");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to create order');
     }
-
-    const items = createOrderCart.map(ci => ({
-      menuItemId: ci.id,
-      quantity: ci.quantity,
-      specialInstructions: ci.specialInstructions,
-      price: ci.price,
-    }));
-    const deliveryFee = location.deliveryFee || 0;
-    const totalAmount = getCreateOrderSubtotal() + deliveryFee;
-
-    const newOrder: FoodOrder = {
-      id: Date.now().toString(),
-      guestId: selectedGuestId,
-      deliveryLocation: location,
-      items,
-      totalAmount,
-      orderType: createOrderType,
-      status: "pending",
-      orderTime: new Date().toISOString(),
-      paymentStatus: "pending",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as any;
-
-    setFoodOrders(prev => [newOrder, ...prev]);
-    toast.success("Order created successfully");
-    // reset
-    setIsCreateOrderOpen(false);
-    setCreateOrderCart([]);
-    setSelectedGuestId("");
-    setCreateOrderType("room-service");
-    setSelectedLocationId(getDefaultLocationIdForType("room-service"));
-    setMenuSearchForCreate("");
   };
 
   const getStatusBadge = (status: OrderStatus) => {
@@ -182,51 +177,63 @@ const FoodOrdering = () => {
     toast.success(`Order status updated to ${newStatus}`);
   };
 
-  const handleSaveMenuItem = (formData: FormData) => {
-    const newItem: MenuItem = {
-      id: editingItem?.id || Date.now().toString(),
+  const handleSaveMenuItem = async (formData: FormData) => {
+    const payload = {
       name: formData.get("name") as string,
       description: formData.get("description") as string,
       price: parseInt(formData.get("price") as string),
-      category: formData.get("category") as MenuCategory,
+      category: formData.get("category") as string,
       isAvailable: formData.get("isAvailable") === "true",
       preparationTime: parseInt(formData.get("preparationTime") as string),
-      ingredients: (formData.get("ingredients") as string).split(",").map(i => i.trim()),
-      dietaryRestrictions: [],
       allergens: (formData.get("allergens") as string).split(",").map(a => a.trim()).filter(Boolean)
     };
 
-    if (editingItem) {
-      setMenuItems(prev => prev.map(item => 
-        item.id === editingItem.id ? newItem : item
-      ));
-      toast.success("Menu item updated successfully");
-    } else {
-      setMenuItems(prev => [...prev, newItem]);
-      toast.success("Menu item added successfully");
+    try {
+      if (editingItem) {
+        const updated = await menuService.updateMenuItem(editingItem.id, payload);
+        setMenuItems(prev => prev.map(item => 
+          item.id === editingItem.id ? updated : item
+        ));
+        toast.success("Menu item updated successfully");
+      } else {
+        const created = await menuService.createMenuItem(payload);
+        setMenuItems(prev => [...prev, created]);
+        toast.success("Menu item added successfully");
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save menu item');
     }
     
     setIsNewMenuItemOpen(false);
     setEditingItem(null);
   };
 
-  const handleDeleteMenuItem = () => {
+  const handleDeleteMenuItem = async () => {
     if (!deletingItem) return;
     
-    setMenuItems(prev => prev.filter(item => item.id !== deletingItem.id));
-    toast.success("Menu item deleted successfully");
+    try {
+      await menuService.deleteMenuItem(deletingItem.id);
+      setMenuItems(prev => prev.filter(item => item.id !== deletingItem.id));
+      toast.success("Menu item deleted successfully");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete menu item');
+    }
+
     setIsDeleteDialogOpen(false);
     setDeletingItem(null);
   };
 
-  const handleToggleAvailability = (itemId: string) => {
-    setMenuItems(prev => prev.map(item => 
-      item.id === itemId 
-        ? { ...item, isAvailable: !item.isAvailable }
-        : item
-    ));
+  const handleToggleAvailability = async (itemId: string) => {
     const item = menuItems.find(i => i.id === itemId);
-    toast.success(`${item?.name} ${item?.isAvailable ? 'marked as unavailable' : 'marked as available'}`);
+    try {
+      const updated = await menuService.toggleAvailability(itemId);
+      setMenuItems(prev => prev.map(i => 
+        i.id === itemId ? updated : i
+      ));
+      toast.success(`${updated.name} ${updated.isAvailable ? 'marked as available' : 'marked as unavailable'}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update availability');
+    }
   };
 
   const openViewDialog = (item: MenuItem) => {
@@ -244,116 +251,128 @@ const FoodOrdering = () => {
     setIsDeleteDialogOpen(true);
   };
 
-  const MenuItemForm = () => (
-    <form action={handleSaveMenuItem} className="space-y-4">
-      <div>
-        <Label htmlFor="name">Item Name</Label>
-        <Input 
-          id="name" 
-          name="name" 
-          defaultValue={editingItem?.name}
-          required 
-        />
-      </div>
-      
-      <div>
-        <Label htmlFor="description">Description</Label>
-        <Textarea 
-          id="description" 
-          name="description" 
-          defaultValue={editingItem?.description}
-          required 
-        />
-      </div>
-      
-      <div className="grid grid-cols-2 gap-4">
+  const MenuItemForm = () => {
+    const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      const fd = new FormData(e.currentTarget);
+      // Normalize checkbox to boolean presence
+      if (!fd.get('isAvailable')) {
+        fd.set('isAvailable', 'false');
+      }
+      await handleSaveMenuItem(fd);
+    };
+
+    return (
+      <form onSubmit={onSubmit} className="space-y-4">
         <div>
-          <Label htmlFor="price">Price (KES)</Label>
+          <Label htmlFor="name">Item Name</Label>
           <Input 
-            id="price" 
-            name="price" 
-            type="number" 
-            defaultValue={editingItem?.price}
+            id="name" 
+            name="name" 
+            defaultValue={editingItem?.name}
             required 
           />
         </div>
         
         <div>
-          <Label htmlFor="preparationTime">Prep Time (minutes)</Label>
-          <Input 
-            id="preparationTime" 
-            name="preparationTime" 
-            type="number" 
-            defaultValue={editingItem?.preparationTime}
+          <Label htmlFor="description">Description</Label>
+          <Textarea 
+            id="description" 
+            name="description" 
+            defaultValue={editingItem?.description}
             required 
           />
         </div>
-      </div>
-      
-      <div>
-        <Label htmlFor="category">Category</Label>
-        <Select name="category" defaultValue={editingItem?.category}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select category" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="appetizers">Appetizers</SelectItem>
-            <SelectItem value="mains">Main Courses</SelectItem>
-            <SelectItem value="desserts">Desserts</SelectItem>
-            <SelectItem value="beverages">Beverages</SelectItem>
-            <SelectItem value="breakfast">Breakfast</SelectItem>
-            <SelectItem value="lunch">Lunch</SelectItem>
-            <SelectItem value="dinner">Dinner</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      
-      <div>
-        <Label htmlFor="ingredients">Ingredients (comma separated)</Label>
-        <Input 
-          id="ingredients" 
-          name="ingredients" 
-          defaultValue={editingItem?.ingredients.join(", ")}
-        />
-      </div>
-      
-      <div>
-        <Label htmlFor="allergens">Allergens (comma separated)</Label>
-        <Input 
-          id="allergens" 
-          name="allergens" 
-          defaultValue={editingItem?.allergens?.join(", ")}
-        />
-      </div>
-      
-      <div className="flex items-center space-x-2">
-        <input 
-          type="checkbox" 
-          id="isAvailable" 
-          name="isAvailable" 
-          value="true"
-          defaultChecked={editingItem?.isAvailable !== false}
-        />
-        <Label htmlFor="isAvailable">Available</Label>
-      </div>
-      
-      <div className="flex justify-end space-x-2">
-        <Button 
-          type="button" 
-          variant="outline" 
-          onClick={() => {
-            setIsNewMenuItemOpen(false);
-            setEditingItem(null);
-          }}
-        >
-          Cancel
-        </Button>
-        <Button type="submit">
-          {editingItem ? "Update Item" : "Add Item"}
-        </Button>
-      </div>
-    </form>
-  );
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="price">Price (KES)</Label>
+            <Input 
+              id="price" 
+              name="price" 
+              type="number" 
+              defaultValue={editingItem?.price}
+              required 
+            />
+          </div>
+          
+          <div>
+            <Label htmlFor="preparationTime">Prep Time (minutes)</Label>
+            <Input 
+              id="preparationTime" 
+              name="preparationTime" 
+              type="number" 
+              defaultValue={editingItem?.preparationTime}
+              required 
+            />
+          </div>
+        </div>
+        
+        <div>
+          <Label htmlFor="category">Category</Label>
+          <Select name="category" defaultValue={editingItem?.category}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="appetizers">Appetizers</SelectItem>
+              <SelectItem value="mains">Main Courses</SelectItem>
+              <SelectItem value="desserts">Desserts</SelectItem>
+              <SelectItem value="beverages">Beverages</SelectItem>
+              <SelectItem value="breakfast">Breakfast</SelectItem>
+              <SelectItem value="lunch">Lunch</SelectItem>
+              <SelectItem value="dinner">Dinner</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        
+        <div>
+          <Label htmlFor="ingredients">Ingredients (comma separated)</Label>
+          <Input 
+            id="ingredients" 
+            name="ingredients" 
+            defaultValue={editingItem?.ingredients.join(", ")}
+          />
+        </div>
+        
+        <div>
+          <Label htmlFor="allergens">Allergens (comma separated)</Label>
+          <Input 
+            id="allergens" 
+            name="allergens" 
+            defaultValue={editingItem?.allergens?.join(", ")}
+          />
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          <input 
+            type="checkbox" 
+            id="isAvailable" 
+            name="isAvailable" 
+            value="true"
+            defaultChecked={editingItem?.isAvailable !== false}
+          />
+          <Label htmlFor="isAvailable">Available</Label>
+        </div>
+        
+        <div className="flex justify-end space-x-2">
+          <Button 
+            type="button" 
+            variant="outline" 
+            onClick={() => {
+              setIsNewMenuItemOpen(false);
+              setEditingItem(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button type="submit">
+            {editingItem ? "Update Item" : "Add Item"}
+          </Button>
+        </div>
+      </form>
+    );
+  };
 
   const canManageMenu = user?.role === "admin";
   const canManageOrders = user?.role === "admin" || user?.role === "receptionist";
@@ -386,7 +405,7 @@ const FoodOrdering = () => {
                       {canManageMenu 
                         ? "Manage your restaurant menu items - add, edit, view, delete, and control availability" 
                         : "View available menu items and place orders"
-                      }
+                      } • {menuItems.length} items
                     </CardDescription>
                   </div>
                   {canManageMenu && (
@@ -567,8 +586,8 @@ const FoodOrdering = () => {
                                     <SelectValue placeholder="Select guest" />
                                   </SelectTrigger>
                                   <SelectContent className="max-h-64">
-                                    {mockGuests.map((g) => (
-                                      <SelectItem key={g.id} value={g.id}>{g.name} {g.roomId ? `(Room ${g.roomId})` : ""}</SelectItem>
+                                    {guests.map((g) => (
+                                      <SelectItem key={g.id} value={g.id}>{g.name || `${g.firstName} ${g.lastName}`} {g.roomId ? `(Room ${g.roomId})` : ""}</SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
@@ -600,9 +619,10 @@ const FoodOrdering = () => {
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className="max-h-64">
-                                      {mockHotelLocations.map((loc) => (
-                                        <SelectItem key={loc.id} value={loc.id}>{loc.name} • {loc.zone}</SelectItem>
-                                      ))}
+                                      <SelectItem value="restaurant">Main Restaurant</SelectItem>
+                                      <SelectItem value="room">Room Service</SelectItem>
+                                      <SelectItem value="poolside">Poolside</SelectItem>
+                                      <SelectItem value="spa">Spa</SelectItem>
                                     </SelectContent>
                                   </Select>
                                 </div>
@@ -708,25 +728,25 @@ const FoodOrdering = () => {
                     {filteredOrders.map((order) => (
                       <TableRow key={order.id}>
                         <TableCell className="font-mono">{order.id}</TableCell>
-                        <TableCell>{mockGuests.find(g => g.id === order.guestId)?.name || order.guestId}</TableCell>
+                        <TableCell>{guests.find(g => g.id === order.guestId)?.name || order.guestId}</TableCell>
                         <TableCell>
                           <Badge variant="outline">{order.orderType}</Badge>
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            {order.items.map(item => `${item.quantity}x ${menuItems.find(m => m.id === item.menuItemId)?.name || 'Unknown'}`).join(", ")}
+                            {order.items?.map((item: any) => `${item.quantity}x ${menuItems.find(m => m.id === item.menuItemId)?.name || 'Unknown'}`).join(", ") || 'No items'}
                           </div>
                         </TableCell>
-                        <TableCell>KES {order.totalAmount.toLocaleString()}</TableCell>
+                        <TableCell>KES {order.totalAmount?.toLocaleString() || '0'}</TableCell>
                         {canEditOrders && (
                           <TableCell>{getStatusBadge(order.status)}</TableCell>
                         )}
-                        <TableCell>{new Date(order.orderTime).toLocaleString()}</TableCell>
+                        <TableCell>{order.orderTime ? new Date(order.orderTime).toLocaleString() : 'N/A'}</TableCell>
                         {canEditOrders && (
                           <TableCell>
                             <Select 
                               value={order.status} 
-                              onValueChange={(value) => handleUpdateOrderStatus(order.id, value as OrderStatus)}
+                              onValueChange={(value) => handleUpdateOrderStatus(order.id, value)}
                             >
                               <SelectTrigger className="w-32">
                                 <SelectValue />

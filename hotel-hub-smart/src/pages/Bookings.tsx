@@ -8,18 +8,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { mockBookings, mockGuests, mockRooms, Booking } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, Calendar, DollarSign, Search, Edit, Trash2, Eye, CheckCircle, XCircle, User, Bed } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import bookingService from "@/services/bookingService";
+import roomService from "@/services/roomService";
+import guestService from "@/services/guestService";
 
 const Bookings = () => {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [bookings, setBookings] = useState<Booking[]>(mockBookings);
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [guests, setGuests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -30,127 +35,157 @@ const Bookings = () => {
     roomId: "",
     checkIn: "",
     checkOut: "",
-    status: "confirmed" as "confirmed" | "checked-in" | "checked-out" | "cancelled",
-    totalAmount: "",
-    paidAmount: "",
+    numberOfGuests: {
+      adults: 1,
+      children: 0
+    },
+    guestDetails: {
+      firstName: "",
+      lastName: "",
+      email: "",
+      phone: "",
+      idNumber: ""
+    }
   });
 
+  // Load data on component mount
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [bookingsData, roomsData, guestsData] = await Promise.all([
+        bookingService.getAllBookings(),
+        roomService.getTransformedRooms(),
+        guestService.getTransformedGuests()
+      ]);
+      
+      setBookings(bookingsData.map(booking => bookingService.transformBooking(booking)));
+      setRooms(roomsData);
+      setGuests(guestsData);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast.error('Failed to load bookings data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredBookings = bookings.filter((booking) => {
-    const guest = mockGuests.find(g => g.id === booking.guestId);
-    const room = mockRooms.find(r => r.id === booking.roomId);
+    const guest = guests.find(g => g.id === booking.guestId);
+    const room = rooms.find(r => r.id === booking.roomId);
     const matchesSearch = 
       guest?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      booking.bookingNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       room?.number.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || booking.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const handleAddBooking = () => {
-    if (!formData.guestId || !formData.roomId || !formData.checkIn || !formData.checkOut || !formData.totalAmount) {
+  const handleAddBooking = async () => {
+    if (!formData.roomId || !formData.checkIn || !formData.checkOut || 
+        !formData.guestDetails.firstName || !formData.guestDetails.lastName || 
+        !formData.guestDetails.email || !formData.guestDetails.phone || 
+        !formData.guestDetails.idNumber) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const newBooking: Booking = {
-      id: Date.now().toString(),
-      guestId: formData.guestId,
-      roomId: formData.roomId,
-      checkIn: formData.checkIn,
-      checkOut: formData.checkOut,
-      status: formData.status,
-      totalAmount: parseInt(formData.totalAmount),
-      paidAmount: parseInt(formData.paidAmount) || 0,
-    };
+    try {
+      const genBookingNumber = () => {
+        const d = new Date();
+        const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+        const rnd = Math.floor(1000 + Math.random()*9000);
+        return `BK-${ymd}-${rnd}`;
+      };
+      const bookingData = {
+        roomId: formData.roomId,
+        checkInDate: formData.checkIn,
+        checkOutDate: formData.checkOut,
+        numberOfGuests: formData.numberOfGuests,
+        guestDetails: formData.guestDetails,
+        bookingNumber: genBookingNumber(),
+        source: 'walk_in'
+      } as any;
 
-    setBookings([...bookings, newBooking]);
-    setIsAddDialogOpen(false);
-    resetForm();
-    toast.success("Booking created successfully!");
+      await bookingService.createBooking(bookingData);
+      await loadData(); // Refresh the data
+      setIsAddDialogOpen(false);
+      resetForm();
+      toast.success("Booking created successfully!");
+    } catch (error: any) {
+      console.error('Error creating booking:', error);
+      toast.error(error.message || 'Failed to create booking');
+    }
   };
 
-  const handleEditBooking = () => {
-    if (!selectedBooking || !formData.guestId || !formData.roomId || !formData.checkIn || !formData.checkOut || !formData.totalAmount) {
-      toast.error("Please fill in all required fields");
+  const handleEditBooking = async () => {
+    if (!selectedBooking) {
+      toast.error("No booking selected");
       return;
     }
 
-    const updatedBookings = bookings.map(booking =>
-      booking.id === selectedBooking.id
-        ? {
-            ...booking,
-            guestId: formData.guestId,
-            roomId: formData.roomId,
-            checkIn: formData.checkIn,
-            checkOut: formData.checkOut,
-            status: formData.status,
-            totalAmount: parseInt(formData.totalAmount),
-            paidAmount: parseInt(formData.paidAmount) || 0,
-          }
-        : booking
-    );
-
-    setBookings(updatedBookings);
-    setIsEditDialogOpen(false);
-    setSelectedBooking(null);
-    resetForm();
-    toast.success("Booking updated successfully!");
+    try {
+      // For now, we'll just show a message that edit functionality is pending
+      toast.info("Booking edit functionality is being implemented");
+      setIsEditDialogOpen(false);
+      setSelectedBooking(null);
+      resetForm();
+    } catch (error: any) {
+      console.error('Error updating booking:', error);
+      toast.error(error.message || 'Failed to update booking');
+    }
   };
 
-  const handleDeleteBooking = () => {
+  const handleDeleteBooking = async () => {
     if (!selectedBooking) return;
 
-    setBookings(bookings.filter(booking => booking.id !== selectedBooking.id));
-    setIsDeleteDialogOpen(false);
-    setSelectedBooking(null);
-    toast.success("Booking deleted successfully!");
+    try {
+      await bookingService.cancelBooking(selectedBooking.id, "Cancelled by receptionist");
+      await loadData(); // Refresh the data
+      setIsDeleteDialogOpen(false);
+      setSelectedBooking(null);
+      toast.success("Booking cancelled successfully!");
+    } catch (error: any) {
+      console.error('Error cancelling booking:', error);
+      toast.error(error.message || 'Failed to cancel booking');
+    }
   };
 
-  const handleCheckIn = (booking: Booking) => {
-    const updatedBookings = bookings.map(b =>
-      b.id === booking.id ? { ...b, status: "checked-in" as const } : b
-    );
-    setBookings(updatedBookings);
-    toast.success("Guest checked in successfully!");
+  const handleCheckIn = async (booking: any) => {
+    try {
+      await bookingService.updateBookingStatus(booking.id, "checked_in");
+      await loadData(); // Refresh the data
+      toast.success("Guest checked in successfully!");
+    } catch (error: any) {
+      console.error('Error checking in guest:', error);
+      toast.error(error.message || 'Failed to check in guest');
+    }
   };
 
-  const handleCheckOut = (booking: Booking) => {
-    const updatedBookings = bookings.map(b =>
-      b.id === booking.id ? { ...b, status: "checked-out" as const } : b
-    );
-    setBookings(updatedBookings);
-    
-    // Update room status to "cleaning" for housekeeping
-    const updatedRooms = mockRooms.map(room =>
-      room.id === booking.roomId ? { ...room, status: "cleaning" as const } : room
-    );
-    
-    // Create automatic housekeeping task
-    const newTask = {
-      id: Date.now().toString(),
-      roomId: booking.roomId,
-      assignedTo: "", // Will be assigned by admin
-      priority: "medium" as const,
-      description: `Clean room after guest checkout - Booking ${booking.id}`,
-      status: "pending" as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    
-    // Store task in localStorage (in a real app, this would be an API call)
-    const existingTasks = JSON.parse(localStorage.getItem("housekeepingTasks") || "[]");
-    existingTasks.push(newTask);
-    localStorage.setItem("housekeepingTasks", JSON.stringify(existingTasks));
-    
-    toast.success("Guest checked out successfully! Cleaning task created automatically.");
+  const handleCheckOut = async (booking: any) => {
+    try {
+      await bookingService.updateBookingStatus(booking.id, "checked_out");
+      await loadData(); // Refresh the data
+      toast.success("Guest checked out successfully!");
+    } catch (error: any) {
+      console.error('Error checking out guest:', error);
+      toast.error(error.message || 'Failed to check out guest');
+    }
   };
 
-  const handleCancelBooking = (booking: Booking) => {
-    const updatedBookings = bookings.map(b =>
-      b.id === booking.id ? { ...b, status: "cancelled" as const } : b
-    );
-    setBookings(updatedBookings);
-    toast.success("Booking cancelled successfully!");
+  const handleCancelBooking = async (booking: any) => {
+    try {
+      await bookingService.cancelBooking(booking.id, "Cancelled by receptionist");
+      await loadData(); // Refresh the data
+      toast.success("Booking cancelled successfully!");
+    } catch (error: any) {
+      console.error('Error cancelling booking:', error);
+      toast.error(error.message || 'Failed to cancel booking');
+    }
   };
 
   const resetForm = () => {
@@ -159,32 +194,48 @@ const Bookings = () => {
       roomId: "",
       checkIn: "",
       checkOut: "",
-      status: "confirmed",
-      totalAmount: "",
-      paidAmount: "",
+      numberOfGuests: {
+        adults: 1,
+        children: 0
+      },
+      guestDetails: {
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        idNumber: ""
+      }
     });
   };
 
-  const openEditDialog = (booking: Booking) => {
+  const openEditDialog = (booking: any) => {
     setSelectedBooking(booking);
     setFormData({
       guestId: booking.guestId,
       roomId: booking.roomId,
       checkIn: booking.checkIn,
       checkOut: booking.checkOut,
-      status: booking.status,
-      totalAmount: booking.totalAmount.toString(),
-      paidAmount: booking.paidAmount.toString(),
+      numberOfGuests: {
+        adults: booking.adults || 1,
+        children: booking.children || 0
+      },
+      guestDetails: booking.guestDetails || {
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        idNumber: ""
+      }
     });
     setIsEditDialogOpen(true);
   };
 
-  const openDeleteDialog = (booking: Booking) => {
+  const openDeleteDialog = (booking: any) => {
     setSelectedBooking(booking);
     setIsDeleteDialogOpen(true);
   };
 
-  const openViewDialog = (booking: Booking) => {
+  const openViewDialog = (booking: any) => {
     setSelectedBooking(booking);
     setIsViewDialogOpen(true);
   };
@@ -213,28 +264,13 @@ const Bookings = () => {
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="guestId">Guest</Label>
-                    <Select value={formData.guestId} onValueChange={(value) => setFormData({...formData, guestId: value})}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select guest" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mockGuests.map((guest) => (
-                          <SelectItem key={guest.id} value={guest.id}>
-                            {guest.name} - {guest.email}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
                     <Label htmlFor="roomId">Room</Label>
                     <Select value={formData.roomId} onValueChange={(value) => setFormData({...formData, roomId: value})}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select room" />
                       </SelectTrigger>
                       <SelectContent>
-                        {mockRooms.filter(room => room.status === "available").map((room) => (
+                        {rooms.filter(room => room.status === "available").map((room) => (
                           <SelectItem key={room.id} value={room.id}>
                             Room {room.number} - {room.type} (KES {room.price})
                           </SelectItem>
@@ -262,41 +298,82 @@ const Bookings = () => {
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="totalAmount">Total Amount (KES)</Label>
-                      <Input
-                        id="totalAmount"
-                        type="number"
-                        value={formData.totalAmount}
-                        onChange={(e) => setFormData({...formData, totalAmount: e.target.value})}
-                        placeholder="0"
-                      />
+                  
+                  {/* Guest Details */}
+                  <div className="space-y-4 border-t pt-4">
+                    <h4 className="font-medium">Guest Information</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="firstName">First Name</Label>
+                        <Input
+                          id="firstName"
+                          value={formData.guestDetails.firstName}
+                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, firstName: e.target.value}})}
+                          placeholder="First name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="lastName">Last Name</Label>
+                        <Input
+                          id="lastName"
+                          value={formData.guestDetails.lastName}
+                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, lastName: e.target.value}})}
+                          placeholder="Last name"
+                        />
+                      </div>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="paidAmount">Paid Amount (KES)</Label>
+                      <Label htmlFor="email">Email</Label>
                       <Input
-                        id="paidAmount"
-                        type="number"
-                        value={formData.paidAmount}
-                        onChange={(e) => setFormData({...formData, paidAmount: e.target.value})}
-                        placeholder="0"
+                        id="email"
+                        type="email"
+                        value={formData.guestDetails.email}
+                        onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, email: e.target.value}})}
+                        placeholder="guest@email.com"
                       />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="status">Status</Label>
-                    <Select value={formData.status} onValueChange={(value) => setFormData({...formData, status: value as any})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="confirmed">Confirmed</SelectItem>
-                        <SelectItem value="checked-in">Checked-in</SelectItem>
-                        <SelectItem value="checked-out">Checked-out</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">Phone</Label>
+                        <Input
+                          id="phone"
+                          value={formData.guestDetails.phone}
+                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, phone: e.target.value}})}
+                          placeholder="+254 712 345 678"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="idNumber">ID Number</Label>
+                        <Input
+                          id="idNumber"
+                          value={formData.guestDetails.idNumber}
+                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, idNumber: e.target.value}})}
+                          placeholder="12345678"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="adults">Adults</Label>
+                        <Input
+                          id="adults"
+                          type="number"
+                          min="1"
+                          value={formData.numberOfGuests.adults}
+                          onChange={(e) => setFormData({...formData, numberOfGuests: {...formData.numberOfGuests, adults: parseInt(e.target.value) || 1}})}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="children">Children</Label>
+                        <Input
+                          id="children"
+                          type="number"
+                          min="0"
+                          value={formData.numberOfGuests.children}
+                          onChange={(e) => setFormData({...formData, numberOfGuests: {...formData.numberOfGuests, children: parseInt(e.target.value) || 0}})}
+                        />
+                      </div>
+                    </div>
                   </div>
                   <div className="flex gap-2 pt-4">
                     <Button onClick={handleAddBooking} className="flex-1">Create Booking</Button>
@@ -328,8 +405,8 @@ const Bookings = () => {
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="checked-in">Checked-in</SelectItem>
-                  <SelectItem value="checked-out">Checked-out</SelectItem>
+                  <SelectItem value="checked_in">Checked-in</SelectItem>
+                  <SelectItem value="checked_out">Checked-out</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
@@ -338,10 +415,29 @@ const Bookings = () => {
         </Card>
 
         {/* Bookings List */}
-        <div className="grid grid-cols-1 gap-4">
-          {filteredBookings.map((booking) => {
-            const guest = mockGuests.find((g) => g.id === booking.guestId);
-            const room = mockRooms.find((r) => r.id === booking.roomId);
+        {loading ? (
+          <div className="grid grid-cols-1 gap-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardContent className="p-6">
+                  <div className="space-y-4">
+                    <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                    <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="h-16 bg-gray-200 rounded"></div>
+                      <div className="h-16 bg-gray-200 rounded"></div>
+                      <div className="h-16 bg-gray-200 rounded"></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : filteredBookings.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4">
+            {filteredBookings.map((booking) => {
+              const guest = guests.find((g) => g.id === booking.guestId);
+              const room = rooms.find((r) => r.id === booking.roomId);
             const nights = Math.ceil(
               (new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) /
                 (1000 * 60 * 60 * 24)
@@ -354,8 +450,8 @@ const Bookings = () => {
                     <div className="flex-1 space-y-4">
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="text-xl font-bold">{guest?.name}</h3>
-                          <p className="text-sm text-muted-foreground">Booking #{booking.id}</p>
+                          <h3 className="text-xl font-bold">{guest?.name || `${booking.guestDetails?.firstName} ${booking.guestDetails?.lastName}` || 'Guest'}</h3>
+                          <p className="text-sm text-muted-foreground">Booking #{booking.bookingNumber || booking.id}</p>
                         </div>
                         <StatusBadge status={booking.status} />
                       </div>
@@ -423,7 +519,7 @@ const Bookings = () => {
                               Check-in
                             </Button>
                           )}
-                          {booking.status === "checked-in" && (
+                          {booking.status === "checked_in" && (
                             <Button 
                               variant="default" 
                               size="sm" 
@@ -434,7 +530,7 @@ const Bookings = () => {
                               Check-out
                             </Button>
                           )}
-                          {(booking.status === "confirmed" || booking.status === "checked-in") && (
+                          {(booking.status === "confirmed" || booking.status === "checked_in") && (
                             <Button 
                               variant="destructive" 
                               size="sm" 
@@ -463,8 +559,21 @@ const Bookings = () => {
                 </CardContent>
               </Card>
             );
-          })}
-        </div>
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <Calendar className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No bookings found</h3>
+            <p className="text-gray-500 mb-6">Get started by creating your first booking</p>
+            {user?.role === "receptionist" && (
+              <Button onClick={() => setIsAddDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Booking
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Edit Booking Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -473,91 +582,8 @@ const Bookings = () => {
               <DialogTitle>Edit Booking</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-guestId">Guest</Label>
-                <Select value={formData.guestId} onValueChange={(value) => setFormData({...formData, guestId: value})}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select guest" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockGuests.map((guest) => (
-                      <SelectItem key={guest.id} value={guest.id}>
-                        {guest.name} - {guest.email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-roomId">Room</Label>
-                <Select value={formData.roomId} onValueChange={(value) => setFormData({...formData, roomId: value})}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select room" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockRooms.map((room) => (
-                      <SelectItem key={room.id} value={room.id}>
-                        Room {room.number} - {room.type} (KES {room.price})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-checkIn">Check-in Date</Label>
-                  <Input
-                    id="edit-checkIn"
-                    type="date"
-                    value={formData.checkIn}
-                    onChange={(e) => setFormData({...formData, checkIn: e.target.value})}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-checkOut">Check-out Date</Label>
-                  <Input
-                    id="edit-checkOut"
-                    type="date"
-                    value={formData.checkOut}
-                    onChange={(e) => setFormData({...formData, checkOut: e.target.value})}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-totalAmount">Total Amount (KES)</Label>
-                  <Input
-                    id="edit-totalAmount"
-                    type="number"
-                    value={formData.totalAmount}
-                    onChange={(e) => setFormData({...formData, totalAmount: e.target.value})}
-                    placeholder="0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-paidAmount">Paid Amount (KES)</Label>
-                  <Input
-                    id="edit-paidAmount"
-                    type="number"
-                    value={formData.paidAmount}
-                    onChange={(e) => setFormData({...formData, paidAmount: e.target.value})}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-status">Status</Label>
-                <Select value={formData.status} onValueChange={(value) => setFormData({...formData, status: value as any})}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
-                    <SelectItem value="checked-in">Checked-in</SelectItem>
-                    <SelectItem value="checked-out">Checked-out</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="bg-muted p-4 rounded-lg">
+                <p className="text-sm text-muted-foreground">Booking edit functionality is currently being implemented. Please contact system administrator for booking modifications.</p>
               </div>
               <div className="flex gap-2 pt-4">
                 <Button onClick={handleEditBooking} className="flex-1">Update Booking</Button>
@@ -602,13 +628,13 @@ const Bookings = () => {
                 </div>
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-muted-foreground">Guest</Label>
-                  <p className="text-sm font-semibold">{mockGuests.find(g => g.id === selectedBooking.guestId)?.name}</p>
+                  <p className="text-sm font-semibold">{guests.find(g => g.id === selectedBooking.guestId)?.name || `${selectedBooking.guestDetails?.firstName} ${selectedBooking.guestDetails?.lastName}` || 'Unknown Guest'}</p>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-muted-foreground">Room</Label>
                   <p className="text-sm font-semibold">
-                    Room {mockRooms.find(r => r.id === selectedBooking.roomId)?.number} - 
-                    {mockRooms.find(r => r.id === selectedBooking.roomId)?.type}
+                    Room {rooms.find(r => r.id === selectedBooking.roomId)?.number || 'N/A'} - 
+                    {rooms.find(r => r.id === selectedBooking.roomId)?.type || 'Unknown'}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">

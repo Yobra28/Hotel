@@ -1,0 +1,246 @@
+{
+  "adminUsers": [
+    {
+      "firstName": "John",
+      "lastName": "Manager",
+      "email": "admin@hotel.com",
+      "password": "Admin123!",
+      "phone": "+254700123456",
+      "idNumber": "12345678",
+      "role": "admin",
+      "department": "Management",
+      "position": "General Manager",
+      "employeeId": "EMP001",
+      "hireDate": "2023-01-15",
+      "salary": 150000,
+      "permissions": [
+        "manage_users",
+        "manage_bookings",
+        "manage_rooms",
+        "manage_payments",
+        "view_reports",
+        "manage_inventory",
+        "manage_staff",
+        "system_settings",
+        "financial_reports",
+        "audit_logs"
+      ],
+      "isActive": true,
+      "profileImage": null,
+      "address": {
+        "street": "123 Hotel Avenue",
+        "city": "Nairobi",
+        "state": "Nairobi County",
+        "country": "Kenya",
+        "zipCode": "00100"
+      },
+      "emergencyContact": {
+        "name": "Jane Manager",
+        "relationship": "Spouse",
+        "phone": "+254700987654"
+      }
+    },
+    {
+      "firstName": "Sarah",
+      "lastName": "Admin",
+      "email": "sarah.admin@hotel.com",
+      "password": "Sarah123!",
+      "phone": "+254701234567",
+      "idNumber": "23456789",
+      "role": "admin",
+      "department": "Administration",
+      "position": "Hotel Administrator",
+      "employeeId": "EMP002",
+      "hireDate": "2023-02-20",
+      "salary": 120000,
+      "permissions": [
+        "manage_users",
+        "manage_bookings",
+        "manage_rooms",
+        "manage_payments",
+        "view_reports",
+        "manage_staff",
+        "system_settings"
+      ],
+      "isActive": true,
+      "profileImage": null,
+      "address": {
+        "street": "456 Admin Street",
+        "city": "Nairobi",
+        "state": "Nairobi County",
+        "country": "Kenya",
+        "zipCode": "00200"
+      },
+      "emergencyContact": {
+        "name": "Michael Admin",
+        "relationship": "Brother",
+        "phone": "+254702345678"
+      }
+    }
+  ],
+  "receptionistUsers": [
+    {
+      "firstName": "Mary",
+      "lastName": "Receptionist",
+      "email": "receptionist@hotel.com",
+      "password": "Reception123!",
+      "phone": "+254703456789",
+      "idNumber": "34567890",
+      "role": "receptionist",
+      "department": "Front Office",
+      "position": "Front Desk Manager",
+      "employeeId": "EMP003",
+      "hireDate": "2023-03-10",
+      "salary": 80000,
+      "permissions": [
+        "manage_bookings",
+        "check_in_out",
+        "view_guest_info",
+        "process_payments",
+        "manage_rooms",
+        "handle_complaints",
+        "guest_services"
+      ],
+      "isActive": true,
+      "profileImage": null,
+      "shift": {
+        "type": "morning",
+        "startTime": "06:00",
+        "endTime": "14:00"
+      },
+      "address": {
+        "street": "789 Reception Road",
+        "city": "Nairobi",
+        "state": "Nairobi County",
+        "country": "Kenya",
+        "zipCode": "00300"
+      },
+      "emergencyContact": {
+        "name": "Peter Receptionist",
+        "relationship": "Husband",
+        "phone": "+254704567890"
+      }
+    },
+    {
+      "firstName": "James",
+      "lastName": "Kimani",
+      "email": "james.receptionist@hotel.com",
+      "password": "James123!",
+      "phone": "+254704567891",
+      "idNumber": "45678901",
+      "role": "receptionist",
+      "department": "Front Office",
+      "position": "Receptionist",
+      "employeeId": "EMP004",
+      "hireDate": "2023-04-05",
+      "salary": 65000,
+      "permissions": [
+        "manage_bookings",
+        "check_in_out",
+        "view_guest_info",
+        "process_payments",
+        "guest_services"
+      ],
+      "isActive": true,
+      "profileImage": null,
+      "shift": {
+        "type": "afternoon",
+        "startTime": "14:00",
+        "endTime": "22:00"
+      },
+      "address": {
+        "street": "321 Kimani Street",
+        "city": "Nairobi",
+        "state": "Nairobi County",
+        "country": "Kenya",
+        "zipCode": "00400"
+      },
+      "emergencyContact": {
+        "name": "Grace Kimani",
+        "relationship": "Sister",
+        "phone": "+254705678902"
+      }
+    },
+    {
+      "firstName": "Grace",
+      "lastName": "Mwangi",
+      "email": "grace.receptionist@hotel.com",
+      "password": "Grace123!",
+      "phone": "+254705678903",
+      "idNumber": "56789012",
+      "role": "receptionist",
+      "department": "Front Office",
+      "position": "Night Receptionist",
+      "employeeId": "EMP005",
+      "hireDate": "2023-04-15",
+      "salary": 70000,
+      "permissions": [
+        "manage_bookings",
+        "check_in_out",
+        "view_guest_info",
+        "process_payments",
+        "guest_services",
+        "night_audit"
+      ],
+      "isActive": true,
+      "profileImage": null,
+      "shift": {
+        "type": "night",
+        "startTime": "22:00",
+        "endTime": "06:00"
+      },
+      "address": {
+        "street": "654 Mwangi Avenue",
+        "city": "Nairobi",
+        "state": "Nairobi County",
+        "country": "Kenya",
+        "zipCode": "00500"
+      },
+      "emergencyContact": {
+        "name": "David Mwangi",
+        "relationship": "Father",
+        "phone": "+254706789014"
+      }
+    },
+    {
+      "firstName": "Peter",
+      "lastName": "Ochieng",
+      "email": "peter.receptionist@hotel.com",
+      "password": "Peter123!",
+      "phone": "+254706789015",
+      "idNumber": "67890123",
+      "role": "receptionist",
+      "department": "Front Office",
+      "position": "Weekend Receptionist",
+      "employeeId": "EMP006",
+      "hireDate": "2023-05-01",
+      "salary": 60000,
+      "permissions": [
+        "manage_bookings",
+        "check_in_out",
+        "view_guest_info",
+        "process_payments",
+        "guest_services"
+      ],
+      "isActive": true,
+      "profileImage": null,
+      "shift": {
+        "type": "weekend",
+        "startTime": "08:00",
+        "endTime": "20:00"
+      },
+      "address": {
+        "street": "987 Ochieng Close",
+        "city": "Nairobi",
+        "state": "Nairobi County",
+        "country": "Kenya",
+        "zipCode": "00600"
+      },
+      "emergencyContact": {
+        "name": "Mary Ochieng",
+        "relationship": "Mother",
+        "phone": "+254707890126"
+      }
+    }
+  ]
+}

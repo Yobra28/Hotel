@@ -9,11 +9,13 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { mockBookings, mockGuests, mockRooms, mockPayments, Booking, Payment } from "@/data/mockData";
 import { useAuth } from "@/contexts/AuthContext";
-import { CreditCard, Download, Smartphone, DollarSign, Receipt, CheckCircle, XCircle, Clock, AlertTriangle, Eye, TrendingUp, BarChart3, Calendar, FileText } from "lucide-react";
-import { useState } from "react";
+import { CreditCard, Download, Smartphone, DollarSign, Receipt, CheckCircle, XCircle, Clock, AlertTriangle, Eye, TrendingUp, BarChart3 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import bookingService from "@/services/bookingService";
+import roomService from "@/services/roomService";
+import guestService from "@/services/guestService";
 
 interface PaymentMethod {
   id: string;
@@ -34,18 +36,62 @@ interface PaymentTransaction {
   transactionCode?: string;
 }
 
+type BookingVM = ReturnType<typeof bookingService.transformBooking>;
+
 const Billing = () => {
   const { user } = useAuth();
-  const [bookings] = useState<Booking[]>(mockBookings);
-  const [transactions] = useState<PaymentTransaction[]>([]);
-  const [payments] = useState<Payment[]>(mockPayments);
+  const [bookings, setBookings] = useState<BookingVM[]>([]);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [guests, setGuests] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState("transactions");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const [rawBookings, roomList, guestList] = await Promise.all([
+          bookingService.getAllBookings(),
+          roomService.getTransformedRooms(),
+          guestService.getTransformedGuests(),
+        ]);
+        setBookings(rawBookings.map(b => bookingService.transformBooking(b)));
+        setRooms(roomList);
+        setGuests(guestList);
+      } catch (e) {
+        console.error('Failed to load billing data', e);
+        toast.error('Failed to load billing data');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // Flatten payments from bookings
+  const payments = useMemo(() => {
+    const list: Array<{ id: string; bookingId: string; method: string; amount: number; timestamp: string; status: "pending"|"success"|"failed"; transactionId?: string; }> = [];
+    bookings.forEach(b => {
+      (b.payments || []).forEach((p: any, idx: number) => {
+        list.push({
+          id: `${b.id}-${idx}`,
+          bookingId: b.id,
+          method: p.method || 'cash',
+          amount: p.amount || 0,
+          timestamp: p.paymentDate || b.createdAt || new Date().toISOString(),
+          status: p.status === 'completed' ? 'success' : p.status === 'failed' ? 'failed' : 'pending',
+          transactionId: p.transactionId,
+        });
+      });
+    });
+    return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [bookings]);
 
   // Analytics calculations
-  const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-  const pendingPayments = bookings.filter(b => b.paidAmount < b.totalAmount);
-  const completedPayments = payments.filter(p => p.status === "completed").length;
-  const totalOutstanding = bookings.reduce((sum, b) => sum + (b.totalAmount - b.paidAmount), 0);
+  const totalRevenue = useMemo(() => bookings.reduce((sum, b: any) => sum + (b.paidAmount || 0), 0), [bookings]);
+  const pendingPayments = useMemo(() => bookings.filter((b: any) => (b.paidAmount || 0) < (b.totalAmount || 0)), [bookings]);
+  const completedPayments = useMemo(() => payments.filter(p => p.status === 'success').length, [payments]);
+  const totalOutstanding = useMemo(() => bookings.reduce((sum, b: any) => sum + ((b.totalAmount || 0) - (b.paidAmount || 0)), 0), [bookings]);
 
   const paymentMethods: PaymentMethod[] = [
     {
@@ -97,6 +143,11 @@ const Billing = () => {
           <h1 className="text-3xl font-bold">Transaction Management</h1>
           <p className="text-muted-foreground mt-1">View and monitor all financial transactions and payments</p>
         </div>
+        {loading && (
+          <Card>
+            <CardContent className="p-6">Loading billing data…</CardContent>
+          </Card>
+        )}
 
         {/* Analytics Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -199,9 +250,9 @@ const Billing = () => {
         {/* Billing Cards */}
         <div className="grid grid-cols-1 gap-6">
           {bookings.map((booking) => {
-            const guest = mockGuests.find((g) => g.id === booking.guestId);
-            const room = mockRooms.find((r) => r.id === booking.roomId);
-            const balance = booking.totalAmount - booking.paidAmount;
+            const guest = guests.find((g) => g.id === booking.guestId);
+            const room = rooms.find((r) => r.id === booking.roomId);
+            const balance = (booking.totalAmount || 0) - (booking.paidAmount || 0);
             const nights = Math.ceil(
               (new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) /
                 (1000 * 60 * 60 * 24)
@@ -246,11 +297,11 @@ const Billing = () => {
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Subtotal</span>
-                        <span className="font-medium">KES {Math.round(booking.totalAmount * 0.84)}</span>
+                        <span className="font-medium">KES {Math.round((booking.pricing?.subtotal) ?? (booking.totalAmount * 0.84))}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Tax (16%)</span>
-                        <span className="font-medium">KES {Math.round(booking.totalAmount * 0.16)}</span>
+                        <span className="font-medium">KES {Math.round((booking.pricing?.taxes) ?? (booking.totalAmount * 0.16))}</span>
                       </div>
                       <Separator />
                       <div className="flex justify-between">
@@ -299,7 +350,7 @@ const Billing = () => {
                 <div className="space-y-4">
                   {payments.map((payment) => {
                     const booking = bookings.find(b => b.id === payment.bookingId);
-                    const guest = booking ? mockGuests.find(g => g.id === booking.guestId) : null;
+                    const guest = booking ? guests.find(g => g.id === booking.guestId) : null;
                     return (
                       <div key={payment.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
                         <div className="flex items-center justify-between">
@@ -309,7 +360,7 @@ const Billing = () => {
                               <div>Amount: KES {payment.amount}</div>
                               <div>Method: {payment.method.toUpperCase()}</div>
                               <div>Date: {new Date(payment.timestamp).toLocaleDateString()}</div>
-                              <div>Transaction: {payment.transactionId || 'N/A'}</div>
+                              <div>Transaction: {(payment as any).transactionId || 'N/A'}</div>
                             </div>
                           </div>
                           <div className="text-right">
@@ -347,9 +398,9 @@ const Billing = () => {
               <CardContent>
                 <div className="space-y-4">
                   {bookings.map((booking) => {
-                    const guest = mockGuests.find(g => g.id === booking.guestId);
-                    const room = mockRooms.find(r => r.id === booking.roomId);
-                    const balance = booking.totalAmount - booking.paidAmount;
+                    const guest = guests.find(g => g.id === booking.guestId);
+                    const room = rooms.find(r => r.id === booking.roomId);
+                    const balance = (booking.totalAmount || 0) - (booking.paidAmount || 0);
                     
                     return (
                       <div key={booking.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">

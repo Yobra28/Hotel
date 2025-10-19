@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,23 +14,82 @@ import { Users, Clock, DollarSign, Waves, Calendar as CalendarIcon, Thermometer,
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { 
-  mockPoolFacilities, 
-  mockSwimmingActivities,
-  PoolFacility, 
-  SwimmingActivity,
-  ActivityType 
-} from "@/data/mockData";
+import poolService from "@/services/poolService";
+
+type ActivityType = 'swimming' | 'water-aerobics' | 'pool-party' | 'swimming-lesson' | 'aqua-therapy' | 'pool-games';
+
+interface PoolFacility {
+  id: string;
+  name: string;
+  type: string;
+  status: 'open' | 'closed' | 'maintenance' | 'private-event';
+  capacity: number;
+  currentOccupancy: number;
+  temperature: number;
+  depth: {
+    min: number;
+    max: number;
+  };
+  operatingHours: {
+    open: string;
+    close: string;
+  };
+  amenities: string[];
+}
+
+interface SwimmingActivity {
+  id: string;
+  name: string;
+  description: string;
+  type: ActivityType;
+  poolId: string;
+  instructor?: string;
+  price: number;
+  duration: number;
+  capacity: number;
+  currentParticipants: number;
+  skillLevel: string;
+  ageRequirement: {
+    min: number;
+    max?: number;
+  };
+  isActive: boolean;
+  nextSession: Date;
+}
 
 const GuestSwimmingActivities = () => {
   const { user } = useAuth();
-  const [poolFacilities] = useState<PoolFacility[]>(mockPoolFacilities.filter(pool => pool.status === "open"));
-  const [swimmingActivities] = useState<SwimmingActivity[]>(mockSwimmingActivities.filter(activity => activity.isActive));
+  const [poolFacilities, setPoolFacilities] = useState<PoolFacility[]>([]);
+  const [swimmingActivities, setSwimmingActivities] = useState<SwimmingActivity[]>([]);
   const [selectedActivityType, setSelectedActivityType] = useState<ActivityType | "all">("all");
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<SwimmingActivity | null>(null);
   const [selectedPool, setSelectedPool] = useState<PoolFacility | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date>();
+  const [loading, setLoading] = useState(true);
+
+  // Load data on component mount
+  useEffect(() => {
+    loadPoolsAndActivities();
+  }, []);
+
+  // Load pools and activities from API
+  const loadPoolsAndActivities = async () => {
+    try {
+      setLoading(true);
+      const [pools, activities] = await Promise.all([
+        poolService.getTransformedPools(),
+        poolService.getTransformedActivities()
+      ]);
+      setPoolFacilities(pools.filter(pool => pool.status === "open"));
+      setSwimmingActivities(activities.filter(activity => activity.isActive));
+    } catch (error) {
+      console.error('Error loading pools and activities:', error);
+      toast.error('Failed to load pool facilities and activities');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredActivities = swimmingActivities.filter(activity => {
     return selectedActivityType === "all" || activity.type === selectedActivityType;
@@ -48,13 +107,28 @@ const GuestSwimmingActivities = () => {
     setIsBookingOpen(true);
   };
 
-  const handleSubmitBooking = (formData: FormData) => {
-    // In a real app, this would make an API call to create the reservation
-    toast.success("Reservation submitted successfully! You'll receive a confirmation shortly.");
-    setIsBookingOpen(false);
-    setSelectedActivity(null);
-    setSelectedPool(null);
-    setSelectedDate(undefined);
+  const handleSubmitBooking = async (formData: FormData) => {
+    try {
+      const bookingData = {
+        poolId: formData.get('poolId') as string,
+        activityId: formData.get('activityId') as string || undefined,
+        bookingDate: formData.get('date') as string,
+        startTime: formData.get('startTime') as string,
+        endTime: formData.get('endTime') as string,
+        numberOfParticipants: parseInt(formData.get('participants') as string),
+        specialRequests: formData.get('specialRequests') as string || undefined
+      };
+
+      await poolService.createPoolBooking(bookingData);
+      toast.success("Reservation submitted successfully! You'll receive a confirmation shortly.");
+      setIsBookingOpen(false);
+      setSelectedActivity(null);
+      setSelectedPool(null);
+      setSelectedDate(undefined);
+    } catch (error: any) {
+      console.error('Error creating pool booking:', error);
+      toast.error(error.message || 'Failed to create reservation');
+    }
   };
 
   const getPoolStatusBadge = (status: string) => {
@@ -85,8 +159,27 @@ const GuestSwimmingActivities = () => {
       {/* Pool Facilities */}
       <div className="space-y-4">
         <h4 className="text-md font-medium">Pool Facilities</h4>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {poolFacilities.map((pool) => (
+        {loading ? (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardHeader className="pb-3">
+                  <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2 mt-2"></div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <div className="h-4 bg-gray-200 rounded w-full"></div>
+                    <div className="h-4 bg-gray-200 rounded w-full"></div>
+                    <div className="h-8 bg-gray-200 rounded w-full"></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : poolFacilities.length > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {poolFacilities.map((pool) => (
             <Card key={pool.id} className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
@@ -146,9 +239,17 @@ const GuestSwimmingActivities = () => {
                   </Button>
                 </div>
               </CardContent>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground text-lg mb-4">No pool facilities available at the moment</p>
+            <Button onClick={loadPoolsAndActivities} variant="outline">
+              Refresh Facilities
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Activities */}
@@ -171,8 +272,27 @@ const GuestSwimmingActivities = () => {
           </Select>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          {filteredActivities.map((activity) => (
+        {loading ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardHeader className="pb-3">
+                  <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-full mt-2"></div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+                    <div className="h-4 bg-gray-200 rounded w-full"></div>
+                    <div className="h-8 bg-gray-200 rounded w-full"></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : filteredActivities.length > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {filteredActivities.map((activity) => (
             <Card key={activity.id} className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
@@ -240,7 +360,15 @@ const GuestSwimmingActivities = () => {
               </CardContent>
             </Card>
           ))}
-        </div>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground text-lg mb-4">No swimming activities available at the moment</p>
+            <Button onClick={loadPoolsAndActivities} variant="outline">
+              Refresh Activities
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Booking Dialog */}
