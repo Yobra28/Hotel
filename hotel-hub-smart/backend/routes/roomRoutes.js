@@ -3,6 +3,7 @@ import { protect, staffOnly, receptionistAccess, adminOnly } from '../middleware
 import {
   listRooms,
   listAvailableRooms,
+  listRoomsSummary,
   getRoom,
   createRoom,
   updateRoom,
@@ -11,8 +12,9 @@ import {
 
 const router = express.Router();
 
-// Public available rooms endpoint (optionally make it protected if needed)
+// Public endpoints for availability/summary
 router.get('/available', listAvailableRooms);
+router.get('/summary', listRoomsSummary);
 
 // Protected routes
 router.use(protect, staffOnly);

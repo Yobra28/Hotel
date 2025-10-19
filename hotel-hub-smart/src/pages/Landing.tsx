@@ -93,16 +93,18 @@ const Landing = () => {
             <div className="hidden md:flex items-center gap-3">
               <Button 
                 variant="ghost" 
-                onClick={() => navigate("/guest-login")}
+                onClick={() => navigate("/login")}
                 className="text-gray-700 hover:text-blue-600"
               >
-                Guest Login
+                <LogIn className="h-4 w-4 mr-2" />
+                Login
               </Button>
               <Button 
-                onClick={() => navigate("/login")}
+                onClick={() => navigate("/register")}
                 className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
               >
-                Staff Login
+                <UserPlus className="h-4 w-4 mr-2" />
+                Get Started
               </Button>
             </div>
             
@@ -129,22 +131,18 @@ const Landing = () => {
               <div className="pt-4 space-y-2">
                 <Button 
                   variant="outline" 
-                  onClick={() => navigate("/guest-login")}
+                  onClick={() => navigate("/login")}
                   className="w-full"
                 >
-                  Guest Login
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Login
                 </Button>
                 <Button 
-                  onClick={() => navigate("/guest-register")}
-                  className="w-full bg-gradient-to-r from-green-600 to-blue-600"
-                >
-                  Register as Guest
-                </Button>
-                <Button 
-                  onClick={() => navigate("/login")}
+                  onClick={() => navigate("/register")}
                   className="w-full bg-gradient-to-r from-blue-600 to-purple-600"
                 >
-                  Staff Login
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Get Started
                 </Button>
               </div>
             </div>
@@ -635,8 +633,8 @@ const Landing = () => {
                 <a href="#rooms" className="block text-gray-300 hover:text-white transition-colors">Rooms & Suites</a>
                 <a href="#amenities" className="block text-gray-300 hover:text-white transition-colors">Amenities</a>
                 <a href="#contact" className="block text-gray-300 hover:text-white transition-colors">Contact Us</a>
-                <button onClick={() => navigate("/guest-login")} className="block text-blue-400 hover:text-blue-300 transition-colors">
-                  Guest Login
+                <button onClick={() => navigate("/login")} className="block text-blue-400 hover:text-blue-300 transition-colors">
+                  Login
                 </button>
               </div>
             </div>

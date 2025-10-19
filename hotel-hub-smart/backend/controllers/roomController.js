@@ -1,5 +1,6 @@
 import Room from '../models/Room.js';
 import { asyncHandler, AppError, successResponse, getPaginationData } from '../middleware/errorHandler.js';
+import Booking from '../models/Booking.js';
 
 // Map frontend types to backend types
 const mapFrontendTypeToBackend = (frontendType) => {
@@ -133,6 +134,47 @@ export const listAvailableRooms = asyncHandler(async (req, res) => {
 
   const rooms = await Room.find(filter);
   successResponse(res, 200, 'Available rooms retrieved successfully', { rooms });
+});
+
+// GET /api/rooms/summary - list all rooms with availability for a date range
+export const listRoomsSummary = asyncHandler(async (req, res) => {
+  const { checkIn, checkOut } = req.query;
+  const rooms = await Room.find({ isActive: true }).select('roomNumber type floor capacity pricePerNight status housekeepingStatus isActive');
+
+  const overlappingByRoom = new Map();
+  const blockedRangesByRoom = new Map();
+  if (checkIn && checkOut) {
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+    const roomIds = rooms.map(r => r._id);
+    const bookings = await Booking.find({
+      room: { $in: roomIds },
+      status: { $in: ['pending', 'confirmed', 'checked_in'] },
+      $or: [
+        { checkInDate: { $lt: end, $gte: start } },
+        { checkOutDate: { $gt: start, $lte: end } },
+        { checkInDate: { $lte: start }, checkOutDate: { $gte: end } },
+      ],
+    }).select('room checkInDate checkOutDate');
+
+    for (const b of bookings) {
+      const key = b.room.toString();
+      overlappingByRoom.set(key, true);
+      const arr = blockedRangesByRoom.get(key) || [];
+      arr.push({ start: b.checkInDate, end: b.checkOutDate });
+      blockedRangesByRoom.set(key, arr);
+    }
+  }
+
+  const data = rooms.map(r => ({
+    room: r,
+    availableForRange: checkIn && checkOut
+      ? !overlappingByRoom.get(r._id.toString())
+      : (r.status === 'available' && r.housekeepingStatus === 'clean' && r.isActive),
+    blockedRanges: blockedRangesByRoom.get(r._id.toString()) || [],
+  }));
+
+  successResponse(res, 200, 'Room summary retrieved successfully', { rooms: data });
 });
 
 // GET /api/rooms/:id

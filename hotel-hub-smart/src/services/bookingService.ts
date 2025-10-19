@@ -123,12 +123,23 @@ class BookingService {
 
   // Create a new booking
   async createBooking(bookingData: CreateBookingData): Promise<Booking> {
-    try {
-      const response = await api.post('/bookings', bookingData);
-      return response.data.data.booking;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error?.message || 'Failed to create booking');
+    // Try guest endpoint first, then fallback to staff endpoint if authorized
+    const tryEndpoints = ['/bookings/guest', '/bookings'];
+    let lastErr: any = null;
+    for (const ep of tryEndpoints) {
+      try {
+        const response = await api.post(ep, bookingData);
+        return response.data.data.booking;
+      } catch (e: any) {
+        lastErr = e;
+        // If forbidden/unauthorized, try next endpoint
+        if ([401, 403].includes(e?.response?.status)) continue;
+        // For other errors (e.g., validation), stop and surface message
+        break;
+      }
     }
+    const msg = lastErr?.response?.data?.error?.message || lastErr?.response?.data?.message || lastErr?.message || 'Failed to create booking';
+    throw new Error(msg);
   }
 
   // Get booking by ID
@@ -152,10 +163,20 @@ class BookingService {
     }
   }
 
-  // Add payment to booking
-  async addPayment(bookingId: string, paymentData: any): Promise<Booking> {
+  // Add payment to booking (staff)
+  async addPayment(bookingId: string, paymentData: { amount: number; method: 'cash' | 'card' | 'bank_transfer' | 'mobile_money' | 'online'; transactionId?: string; status?: 'pending' | 'completed' | 'failed' | 'refunded'; }): Promise<Booking> {
     try {
       const response = await api.post(`/bookings/${bookingId}/payments`, paymentData);
+      return response.data.data.booking;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error?.message || 'Failed to add payment');
+    }
+  }
+
+  // Guest self-payment (e.g., M-Pesa auto-complete or cash pending)
+  async addGuestPayment(bookingId: string, paymentData: { amount: number; method: 'mpesa' | 'cash'; transactionId?: string; }): Promise<Booking> {
+    try {
+      const response = await api.post(`/bookings/${bookingId}/payments/guest`, paymentData);
       return response.data.data.booking;
     } catch (error: any) {
       throw new Error(error.response?.data?.error?.message || 'Failed to add payment');

@@ -40,6 +40,11 @@ export const createFoodOrder = asyncHandler(async (req, res, next) => {
   const { items = [], orderType = 'room-service', deliveryLocation, specialInstructions, guestId, roomId } = req.body;
   if (!Array.isArray(items) || items.length === 0) return next(new AppError('At least one item is required', 400));
 
+  // Validate delivery address for external delivery
+  if (orderType === 'delivery' && (!deliveryLocation || !deliveryLocation.trim())) {
+    return next(new AppError('Delivery address is required for delivery orders', 400));
+  }
+
   // Resolve guest
   let guest = guestId ? await User.findById(guestId) : req.user;
   if (!guest) return next(new AppError('Guest not found', 404));
@@ -80,6 +85,23 @@ export const updateFoodOrderStatus = asyncHandler(async (req, res, next) => {
   if (status === 'delivered') order.actualDeliveryTime = new Date();
   await order.save();
   successResponse(res, 200, 'Order status updated successfully', { order });
+});
+
+// PATCH /api/orders/food/:id/location (guest or staff)
+export const updateFoodOrderLocation = asyncHandler(async (req, res, next) => {
+  const { deliveryLocation } = req.body;
+  if (!deliveryLocation || !deliveryLocation.trim()) {
+    return next(new AppError('deliveryLocation is required', 400));
+  }
+  const order = await FoodOrder.findById(req.params.id);
+  if (!order) return next(new AppError('Order not found', 404));
+  // If guest, ensure ownership
+  if (req.user?.role === 'guest' && order.guest.toString() !== req.user._id.toString()) {
+    return next(new AppError('You can only update your own order', 403));
+  }
+  order.deliveryLocation = deliveryLocation.trim();
+  await order.save();
+  successResponse(res, 200, 'Order location updated', { order });
 });
 
 // DELETE /api/orders/food/:id

@@ -40,22 +40,23 @@ const FoodOrdering = () => {
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   const [createOrderCart, setCreateOrderCart] = useState<CreateCartItem[]>([]);
   const [selectedGuestId, setSelectedGuestId] = useState<string>("");
-  const [createOrderType, setCreateOrderType] = useState<"dine-in" | "room-service" | "takeaway" | "poolside" | "spa">("room-service");
+  const [createOrderType, setCreateOrderType] = useState<"dine-in" | "room-service" | "takeaway" | "poolside" | "spa" | "delivery">("room-service");
   const [selectedLocationId, setSelectedLocationId] = useState<string>("");
+  const [createDeliveryAddress, setCreateDeliveryAddress] = useState<string>("");
   const [menuSearchForCreate, setMenuSearchForCreate] = useState("");
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
-        const [itemsData, guestsData] = await Promise.all([
+        const [itemsData, guestsData, orders] = await Promise.all([
           menuService.getTransformedMenuItems(),
           guestService.getTransformedGuests(),
+          menuService.getAllOrders(),
         ]);
-        // Add foodorders API here once available, for now mock empty
         setMenuItems(itemsData);
         setGuests(guestsData);
-        setFoodOrders([]);
+        setFoodOrders(orders as any);
       } catch (e) {
         console.error('Failed to load food data', e);
         toast.error('Failed to load food data');
@@ -64,6 +65,8 @@ const FoodOrdering = () => {
       }
     };
     load();
+    const t = setInterval(load, 5000); // simple realtime polling
+    return () => clearInterval(t);
   }, []);
 
   const filteredMenuItems = menuItems.filter(item => {
@@ -125,7 +128,7 @@ const FoodOrdering = () => {
       const order = await menuService.createOrder({
         items: createOrderCart.map(ci => ({ menuItemId: ci.id, quantity: ci.quantity, specialInstructions: ci.specialInstructions })),
         orderType: createOrderType,
-        deliveryLocation: selectedLocationId,
+        deliveryLocation: createOrderType === 'delivery' ? createDeliveryAddress : selectedLocationId,
         guestId: selectedGuestId,
       });
       setFoodOrders(prev => [{
@@ -609,22 +612,31 @@ const FoodOrdering = () => {
                                       <SelectItem value="takeaway">Takeaway</SelectItem>
                                       <SelectItem value="poolside">Poolside</SelectItem>
                                       <SelectItem value="spa">Spa</SelectItem>
+                                      <SelectItem value="delivery">Delivery</SelectItem>
                                     </SelectContent>
                                   </Select>
                                 </div>
                                 <div>
                                   <Label>Delivery Location</Label>
-                                  <Select value={selectedLocationId} onValueChange={(v) => setSelectedLocationId(v)}>
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent className="max-h-64">
-                                      <SelectItem value="restaurant">Main Restaurant</SelectItem>
-                                      <SelectItem value="room">Room Service</SelectItem>
-                                      <SelectItem value="poolside">Poolside</SelectItem>
-                                      <SelectItem value="spa">Spa</SelectItem>
-                                    </SelectContent>
-                                  </Select>
+                                  {createOrderType === 'delivery' ? (
+                                    <Input
+                                      placeholder="Full delivery address, landmarks, phone"
+                                      value={createDeliveryAddress}
+                                      onChange={(e) => setCreateDeliveryAddress(e.target.value)}
+                                    />
+                                  ) : (
+                                    <Select value={selectedLocationId} onValueChange={(v) => setSelectedLocationId(v)}>
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent className="max-h-64">
+                                        <SelectItem value="restaurant">Main Restaurant</SelectItem>
+                                        <SelectItem value="room">Room Service</SelectItem>
+                                        <SelectItem value="poolside">Poolside</SelectItem>
+                                        <SelectItem value="spa">Spa</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -716,12 +728,13 @@ const FoodOrdering = () => {
                     <TableRow>
                       <TableHead>Order ID</TableHead>
                       <TableHead>Guest</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Items</TableHead>
-                      <TableHead>Total</TableHead>
-                      {canEditOrders && <TableHead>Status</TableHead>}
-                      <TableHead>Order Time</TableHead>
-                      {canEditOrders && <TableHead>Actions</TableHead>}
+                    <TableHead>Type</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>Total</TableHead>
+                    {canEditOrders && <TableHead>Status</TableHead>}
+                    <TableHead>Order Time</TableHead>
+                    {canEditOrders && <TableHead>Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -731,6 +744,11 @@ const FoodOrdering = () => {
                         <TableCell>{guests.find(g => g.id === order.guestId)?.name || order.guestId}</TableCell>
                         <TableCell>
                           <Badge variant="outline">{order.orderType}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="truncate max-w-[180px]" title={order.deliveryLocation || 'N/A'}>
+                            {order.deliveryLocation || 'N/A'}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">

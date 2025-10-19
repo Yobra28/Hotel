@@ -56,7 +56,7 @@ const GuestLogin = () => {
             </div>
             <Button 
               variant="outline" 
-              onClick={() => navigate("/guest-portal")}
+              onClick={() => navigate("/landing")}
               className="border-blue-200 text-blue-600 hover:bg-blue-50"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />

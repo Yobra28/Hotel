@@ -11,7 +11,7 @@ const foodOrderSchema = new mongoose.Schema({
   guest: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   room: { type: mongoose.Schema.Types.ObjectId, ref: 'Room' },
   items: { type: [orderItemSchema], required: true },
-  orderType: { type: String, enum: ['room-service','takeaway','dine-in','poolside','spa'], default: 'room-service' },
+  orderType: { type: String, enum: ['room-service','takeaway','dine-in','poolside','spa','delivery'], default: 'room-service' },
   status: { type: String, enum: ['pending','confirmed','preparing','ready','delivered','cancelled'], default: 'pending' },
   totalAmount: { type: Number, required: true, min: 0 },
   deliveryLocation: { type: String },

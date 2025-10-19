@@ -55,6 +55,8 @@ const GuestDashboard = () => {
   const [selectedBooking, setSelectedBooking] = useState<GuestBooking | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [rooms, setRooms] = useState<any[]>([]);
+  const [filterCheckIn, setFilterCheckIn] = useState<string>("");
+  const [filterCheckOut, setFilterCheckOut] = useState<string>("");
   const [bookings, setBookings] = useState<GuestBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [roomsLoading, setRoomsLoading] = useState(false);
@@ -103,11 +105,16 @@ const GuestDashboard = () => {
     }
   };
 
-  // Load rooms from API
+  // Load rooms summary from API to show occupancy per selected dates
   const loadRooms = async () => {
     try {
       setRoomsLoading(true);
-      const data = await roomService.getTransformedRooms();
+      const params: any = {};
+      if (filterCheckIn && filterCheckOut) {
+        params.checkIn = filterCheckIn;
+        params.checkOut = filterCheckOut;
+      }
+      const data = await roomService.getTransformedRoomsSummary(params);
       setRooms(data);
     } catch (error) {
       console.error('Error loading rooms:', error);
@@ -134,10 +141,15 @@ const GuestDashboard = () => {
   // Use real bookings from state
   const guestBookings = bookings;
 
-  // Filter available rooms
-  const availableRooms = rooms.filter(room => 
-    room.status === "available" &&
-    (selectedRoomType === "all" || room.type === selectedRoomType) &&
+  // Map UI type to backend type
+  const mapType = (ui: string) => {
+    const m: any = { single: 'Smart Economy', double: 'Business Suite', suite: 'Premium Deluxe', deluxe: 'Presidential' };
+    return m[ui] || ui;
+  };
+
+  // Filter rooms for display (do not hide occupied ones)
+  const filteredRooms = rooms.filter(room =>
+    (selectedRoomType === 'all' || room.type === mapType(selectedRoomType)) &&
     room.number.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -173,8 +185,8 @@ const GuestDashboard = () => {
       setIsBookingDialogOpen(false);
       toast.success("Room booked successfully! Please proceed to payment.");
       
-      // Refresh bookings
-      await loadBookings();
+      // Refresh bookings and rooms to reflect new availability
+      await Promise.all([loadBookings(), loadRooms()]);
       
       setSelectedBooking(transformedBooking);
       setPaymentData({ ...paymentData, amount: transformedBooking.totalAmount.toString() });
@@ -186,17 +198,39 @@ const GuestDashboard = () => {
   };
 
   const handlePayment = async () => {
-    if (!paymentData.amount || !paymentData.phoneNumber) {
+    if (!paymentData.amount || (paymentData.method === 'mpesa' && !paymentData.phoneNumber)) {
       toast.error("Please fill in all payment details");
       return;
     }
 
     try {
-      // Simulate M-Pesa payment via Daraja API
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      toast.success(`Payment of KES ${paymentData.amount} processed successfully!`);
+      if (!selectedBooking) {
+        toast.error('No booking selected');
+        return;
+      }
+
+      if (paymentData.method === 'mpesa') {
+        // Simulate M-Pesa STK push delay
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await bookingService.addGuestPayment(selectedBooking.id, {
+          amount: Number(paymentData.amount),
+          method: 'mpesa',
+          transactionId: `MPESA-${Date.now()}`,
+        });
+        toast.success(`M-Pesa payment of KES ${paymentData.amount} completed!`);
+      } else {
+        // Cash: create a pending payment that receptionist will confirm
+        await bookingService.addGuestPayment(selectedBooking.id, {
+          amount: Number(paymentData.amount),
+          method: 'cash',
+        });
+        toast.info('Cash payment recorded. Please visit reception to complete confirmation.');
+      }
+
       setIsPaymentDialogOpen(false);
+
+      // Refresh data
+      await loadBookings();
       
       // Reset forms
       setBookingData({
@@ -407,7 +441,7 @@ const GuestDashboard = () => {
                   className="pl-10"
                 />
               </div>
-              <Select value={selectedRoomType} onValueChange={setSelectedRoomType}>
+              <Select value={selectedRoomType} onValueChange={(v) => { setSelectedRoomType(v); }}>
                 <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Room type" />
                 </SelectTrigger>
@@ -419,6 +453,21 @@ const GuestDashboard = () => {
                   <SelectItem value="deluxe">Deluxe</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Date range for availability */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm">Check-in</Label>
+                <Input type="date" value={filterCheckIn} onChange={(e) => setFilterCheckIn(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm">Check-out</Label>
+                <Input type="date" value={filterCheckOut} onChange={(e) => setFilterCheckOut(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <Button variant="outline" onClick={loadRooms} className="mt-2">Refresh Rooms</Button>
             </div>
 
             {/* Room Cards */}
@@ -440,9 +489,9 @@ const GuestDashboard = () => {
                   </Card>
                 ))}
               </div>
-            ) : availableRooms.length > 0 ? (
+) : filteredRooms.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {availableRooms.map((room) => (
+                {filteredRooms.map((room) => (
                 <Card key={room.id} className="hover:shadow-lg transition-all duration-300">
               <CardHeader>
                     <div className="flex items-start justify-between">
@@ -453,7 +502,11 @@ const GuestDashboard = () => {
                         </CardTitle>
                         <p className="text-sm text-muted-foreground capitalize mt-1">{room.type} Room</p>
                       </div>
-                      <Badge className="bg-green-100 text-green-800">Available</Badge>
+                      {room.availableForRange ? (
+                        <Badge className="bg-green-100 text-green-800">Available</Badge>
+                      ) : (
+                        <Badge className="bg-red-100 text-red-800">Occupied</Badge>
+                      )}
                     </div>
               </CardHeader>
               <CardContent>
@@ -471,15 +524,27 @@ const GuestDashboard = () => {
                         <span className="text-2xl font-bold text-primary">KES {room.price}</span>
                         <span className="text-sm text-muted-foreground">per night</span>
                       </div>
-                      <Dialog open={isBookingDialogOpen} onOpenChange={setIsBookingDialogOpen}>
+                      <Dialog 
+                        open={isBookingDialogOpen} onOpenChange={setIsBookingDialogOpen}>
                         <DialogTrigger asChild>
                   <Button 
                             className="w-full" 
-                            onClick={() => setSelectedRoom(room)}
+                            onClick={() => {
+                              setSelectedRoom(room);
+                              if (filterCheckIn && filterCheckOut) {
+                                setBookingData({ ...bookingData, checkIn: filterCheckIn, checkOut: filterCheckOut });
+                              }
+                            }}
+                            disabled={!room.availableForRange}
                   >
-                            Book Now
+                            {room.availableForRange ? 'Book Now' : 'Unavailable for selected dates'}
                   </Button>
                         </DialogTrigger>
+                        {!room.availableForRange && room.blockedRanges?.length > 0 && (
+                          <p className="text-xs text-red-600 mt-2">
+                            Unavailable from {new Date(room.blockedRanges[0].start).toLocaleDateString()} to {new Date(room.blockedRanges[0].end).toLocaleDateString()}
+                          </p>
+                        )}
                         <DialogContent className="max-w-md">
                           <DialogHeader>
                             <DialogTitle>Book Room {room.number}</DialogTitle>

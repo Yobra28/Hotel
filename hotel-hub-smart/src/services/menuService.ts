@@ -24,7 +24,7 @@ export interface FoodOrder {
     specialInstructions?: string;
     unitPrice: number;
   }>;
-  orderType: 'room-service' | 'takeaway' | 'dine-in';
+  orderType: 'room-service' | 'takeaway' | 'dine-in' | 'poolside' | 'spa' | 'delivery';
   status: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
   totalAmount: number;
   deliveryLocation?: string;
@@ -46,6 +46,28 @@ export interface CreateOrderData {
 }
 
 class MenuService {
+  // Transform backend order to UI-friendly shape
+  transformOrder(o: FoodOrder): any {
+    return {
+      id: (o as any)._id,
+      guestId: (o as any).guest,
+      roomId: (o as any).room,
+      items: (o.items || []).map((it: any) => ({
+        menuItemId: it.menuItem || it.menuItemId,
+        quantity: it.quantity,
+        specialInstructions: it.specialInstructions,
+        unitPrice: it.unitPrice,
+      })),
+      orderType: o.orderType,
+      status: o.status,
+      totalAmount: o.totalAmount,
+      deliveryLocation: o.deliveryLocation,
+      specialInstructions: o.specialInstructions,
+      orderTime: (o as any).orderDate || (o as any).createdAt,
+      createdAt: (o as any).createdAt,
+      updatedAt: (o as any).updatedAt,
+    };
+  }
   // Get all menu items
   async getMenuItems(): Promise<MenuItem[]> {
     try {
@@ -68,32 +90,57 @@ class MenuService {
     }
   }
 
-  // Create food order
+  // Create food order (tries guest endpoint first)
   async createOrder(orderData: CreateOrderData & { guestId?: string; roomId?: string }): Promise<FoodOrder> {
-    try {
-      const response = await api.post('/orders/food', orderData);
-      return response.data.data.order;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error?.message || 'Failed to create order');
+    const endpoints = ['/orders/food/guest', '/orders/food'];
+    let lastErr: any = null;
+    for (const ep of endpoints) {
+      try {
+        const response = await api.post(ep, orderData);
+        return response.data.data.order;
+      } catch (e: any) {
+        lastErr = e;
+        if ([401,403].includes(e?.response?.status)) continue;
+        break;
+      }
     }
+    throw new Error(lastErr?.response?.data?.error?.message || lastErr?.message || 'Failed to create order');
   }
 
   // Get user's food orders
-  async getMyOrders(): Promise<FoodOrder[]> {
+  async getMyOrders(): Promise<any[]> {
     try {
       const response = await api.get('/orders/food/my-orders');
-      return response.data.data.orders || [];
+      const orders = response.data.data.orders || [];
+      return orders.map((o: any) => this.transformOrder(o));
     } catch (error) {
       console.error('Error fetching user orders:', error);
       return [];
     }
   }
 
+  // Update delivery location (tries guest path first)
+  async updateOrderLocation(id: string, deliveryLocation: string): Promise<FoodOrder> {
+    const endpoints = [`/orders/food/${id}/location/guest`, `/orders/food/${id}/location`];
+    let lastErr: any = null;
+    for (const ep of endpoints) {
+      try {
+        const response = await api.patch(ep, { deliveryLocation });
+        return response.data.data.order;
+      } catch (e: any) {
+        lastErr = e;
+        if ([401,403].includes(e?.response?.status)) continue;
+        break;
+      }
+    }
+    throw new Error(lastErr?.response?.data?.error?.message || lastErr?.message || 'Failed to update order location');
+  }
+
   // Get order by ID
-  async getOrderById(id: string): Promise<FoodOrder | null> {
+  async getOrderById(id: string): Promise<any | null> {
     try {
       const response = await api.get(`/orders/food/${id}`);
-      return response.data.data.order;
+      return this.transformOrder(response.data.data.order);
     } catch (error) {
       console.error('Error fetching order by ID:', error);
       return null;
@@ -111,10 +158,11 @@ class MenuService {
   }
 
   // Admin/staff: get all food orders
-  async getAllOrders(params?: any): Promise<FoodOrder[]> {
+  async getAllOrders(params?: any): Promise<any[]> {
     try {
       const response = await api.get('/orders/food', { params });
-      return response.data.data.orders || [];
+      const orders = response.data.data.orders || [];
+      return orders.map((o: any) => this.transformOrder(o));
     } catch (error) {
       console.error('Error fetching food orders:', error);
       return [];

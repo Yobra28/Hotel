@@ -160,13 +160,36 @@ class RoomService {
     return rooms.map(room => this.transformRoom(room));
   }
 
+  async getTransformedRoomsSummary(params?: { checkIn?: string; checkOut?: string }): Promise<any[]> {
+    const items = await this.getRoomsSummary(params);
+    return items.map((item: any) => ({
+      ...this.transformRoom(item.room as any),
+      availableForRange: item.availableForRange,
+      blockedRanges: (item.blockedRanges || []).map((r: any) => ({
+        start: r.start,
+        end: r.end,
+      })),
+    }));
+  }
+
   // Create mock data structure for backward compatibility
   async getMockCompatibleRooms(): Promise<any[]> {
     const rooms = await this.getAvailableRooms();
     return rooms.map(room => this.transformRoom(room));
   }
 
-  // Get all transformed rooms (including occupied ones)
+  // Get room summary with availability for date range
+  async getRoomsSummary(params?: { checkIn?: string; checkOut?: string }): Promise<any[]> {
+    try {
+      const response = await api.get('/rooms/summary', { params });
+      return response.data.data.rooms || [];
+    } catch (error) {
+      console.error('Error fetching rooms summary:', error);
+      return [];
+    }
+  }
+
+  // Get all transformed rooms (including occupied ones) - staff only
   async getTransformedRooms(): Promise<any[]> {
     const rooms = await this.getAllRooms();
     return rooms.map(room => this.transformRoom(room));

@@ -37,8 +37,9 @@ const GuestFoodOrdering = () => {
   const [selectedCategory, setSelectedCategory] = useState<MenuCategory | "all">("all");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [orderType, setOrderType] = useState<"room-service" | "takeaway">("room-service");
+  const [orderType, setOrderType] = useState<"room-service" | "takeaway" | "delivery">("room-service");
   const [loading, setLoading] = useState(true);
+  const [locationDescription, setLocationDescription] = useState<string>("");
 
   // Load menu items on component mount
   useEffect(() => {
@@ -103,6 +104,23 @@ const GuestFoodOrdering = () => {
     return cart.reduce((total, item) => total + item.quantity, 0);
   };
 
+  // Live location update for most recent order
+  const [lastOrderId, setLastOrderId] = useState<string>("");
+  const [liveLocation, setLiveLocation] = useState<string>("");
+  const handleUpdateLocation = async () => {
+    if (!lastOrderId || !liveLocation.trim()) {
+      toast.error('No recent order or empty location');
+      return;
+    }
+    try {
+      await menuService.updateOrderLocation(lastOrderId, liveLocation.trim());
+      toast.success('Location updated');
+      setLiveLocation("");
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update location');
+    }
+  };
+
   const handlePlaceOrder = async () => {
     if (cart.length === 0) {
       toast.error("Your cart is empty");
@@ -116,12 +134,18 @@ const GuestFoodOrdering = () => {
           quantity: item.quantity,
           specialInstructions: item.specialInstructions
         })),
-        orderType: orderType as 'room-service' | 'takeaway',
-        deliveryLocation: orderType === 'room-service' ? 'Room' : undefined,
+        orderType: orderType as 'room-service' | 'takeaway' | 'delivery',
+        deliveryLocation: locationDescription || undefined,
         specialInstructions: 'Guest order from mobile app'
-      };
+      } as const;
 
-      await menuService.createOrder(orderData);
+      if ((orderType === 'room-service' || orderType === 'delivery') && !locationDescription.trim()) {
+        toast.error('Please enter your room/seat number or location');
+        return;
+      }
+
+      const created = await menuService.createOrder(orderData);
+      setLastOrderId((created as any)._id || created?.id || "");
       toast.success("Order placed successfully! You'll receive a confirmation shortly.");
       setCart([]);
       setIsCheckoutOpen(false);
@@ -167,15 +191,30 @@ const GuestFoodOrdering = () => {
                 <div>
                   <Label htmlFor="orderType">Order Type</Label>
                   <Select value={orderType} onValueChange={(value) => setOrderType(value as "room-service" | "takeaway")}>
-                    <SelectTrigger>
+                  <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="room-service">Room Service</SelectItem>
                       <SelectItem value="takeaway">Takeaway</SelectItem>
+                      <SelectItem value="delivery">Delivery</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="location">Room/Seat or Delivery Address</Label>
+                    <Input
+                      id="location"
+                      placeholder={orderType === 'delivery' ? 'e.g., Riverside Drive, Nairobi — include building/estate and landmarks' : 'e.g., Room 305, Pool Seat A12, Lobby Sofa 3'}
+                      value={locationDescription}
+                      onChange={(e) => setLocationDescription(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {orderType === 'delivery' ? 'Required for delivery orders.' : 'Used for delivery; required for room service.'}
+                    </p>
+                  </div>
 
                 <div className="space-y-3">
                   {cart.map((item) => (
@@ -231,6 +270,7 @@ const GuestFoodOrdering = () => {
                     </Card>
                   ))}
                 </div>
+                </div>
 
                 <div className="border-t pt-4">
                   <div className="flex justify-between items-center text-lg font-semibold">
@@ -250,6 +290,25 @@ const GuestFoodOrdering = () => {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Live Location (for latest order) */}
+      <Card className="mb-4">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Live Delivery Location</CardTitle>
+          <CardDescription>Share or adjust your current location for your latest order.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Input
+              placeholder="e.g., Room 305, Pool Seat A12, Lobby Sofa 3"
+              value={liveLocation}
+              onChange={(e) => setLiveLocation(e.target.value)}
+            />
+            <Button onClick={handleUpdateLocation} disabled={!lastOrderId}>Update Location</Button>
+            <div className="text-xs text-muted-foreground flex items-center">Order: {lastOrderId ? lastOrderId : 'No recent order'}</div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Category Filter */}
       <div className="flex flex-wrap gap-2">

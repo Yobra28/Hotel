@@ -26,6 +26,8 @@ import orderRoutes from './routes/orderRoutes.js';
 import facilitiesRoutes from './routes/facilitiesRoutes.js';
 import activitiesRoutes from './routes/activitiesRoutes.js';
 import poolBookingRoutes from './routes/poolBookingRoutes.js';
+import Booking from './models/Booking.js';
+import Room from './models/Room.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -129,6 +131,39 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// Auto-release rooms whose checkout date has passed
+const autoReleaseRooms = async () => {
+  try {
+    const now = new Date();
+    const expiring = await Booking.find({
+      checkOutDate: { $lte: now },
+      status: { $in: ['confirmed', 'checked_in'] },
+    });
+
+    if (expiring.length) {
+      for (const b of expiring) {
+        const room = await Room.findById(b.room);
+        if (room) {
+          room.status = 'available';
+          room.lastBooking = b._id;
+          room.currentBooking = null;
+          await room.save();
+        }
+        b.status = 'completed';
+        await b.save();
+      }
+      console.log(`Auto-released ${expiring.length} room(s) past checkout.`);
+    }
+  } catch (e) {
+    console.error('Auto-release job error:', e);
+  }
+};
+
+// Run every minute
+setInterval(autoReleaseRooms, 60 * 1000);
+// Also run once on startup
+autoReleaseRooms();
 
 startServer();
 

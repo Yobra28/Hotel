@@ -26,8 +26,6 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import menuService, { type FoodOrder as BackendFoodOrder } from "@/services/menuService";
 import { 
-  mockHotelLocations, 
-  mockDeliveryStaff,
   FoodOrder,
   HotelLocation,
   DeliveryStaff,
@@ -39,8 +37,8 @@ import {
 const LocationBasedFoodManagement = () => {
   const { user } = useAuth();
   const [foodOrders, setFoodOrders] = useState<FoodOrder[]>([]);
-  const [hotelLocations] = useState<HotelLocation[]>(mockHotelLocations);
-  const [deliveryStaff, setDeliveryStaff] = useState<DeliveryStaff[]>(mockDeliveryStaff);
+  const [hotelLocations, setHotelLocations] = useState<HotelLocation[]>([]);
+  const [deliveryStaff, setDeliveryStaff] = useState<DeliveryStaff[]>([]);
   const [selectedZone, setSelectedZone] = useState<DeliveryZone | "all">("all");
   const [selectedOrderStatus, setSelectedOrderStatus] = useState<OrderStatus | "all">("all");
   const [isAssignDeliveryOpen, setIsAssignDeliveryOpen] = useState(false);
@@ -52,15 +50,42 @@ const LocationBasedFoodManagement = () => {
   const canViewAllOrders = user?.role === "admin" || user?.role === "receptionist";
   const isHousekeeper = user?.role === "housekeeping";
 
-  // Map backend deliveryLocation (string) to a HotelLocation object for UI
-  const mapDeliveryLocation = (loc?: string | null): HotelLocation => {
-    const mappings: Record<string, HotelLocation | undefined> = {
-      restaurant: hotelLocations.find(l => l.type === 'restaurant'),
-      room: hotelLocations.find(l => l.type === 'room'),
-      poolside: hotelLocations.find(l => l.name.toLowerCase().includes('pool')), // custom map
-      spa: hotelLocations.find(l => l.type === 'spa'),
+// Map backend deliveryLocation (string) to a HotelLocation object for UI
+  const mapDeliveryLocation = (loc?: string | null, orderType?: string): HotelLocation => {
+    // External delivery: render the raw address as a pseudo location
+    if (orderType === 'delivery' && loc && loc.trim()) {
+      return {
+        id: 'external',
+        name: loc.trim(),
+        type: 'lobby',
+        floor: null as any,
+        zone: 'outside-hotel',
+        deliveryTime: 0,
+        deliveryFee: 0,
+        isActive: true,
+      } as unknown as HotelLocation;
+    }
+    const key = (loc || '').toLowerCase();
+    const mapType = (k: string): LocationType => {
+      if (k.includes('pool')) return 'pool';
+      if (k.includes('spa')) return 'spa';
+      if (k.includes('room')) return 'room';
+      if (k.includes('restaurant')) return 'restaurant';
+      return 'lobby';
     };
-    return (loc ? mappings[loc] : undefined) || hotelLocations[0];
+    const type = mapType(key);
+    const zone = type === 'pool' ? 'pool-area' : type === 'spa' ? 'spa-area' : 'building-a';
+    const defaults = { deliveryTime: type === 'room' ? 15 : 10, deliveryFee: 0 };
+    return {
+      id: `${type}-${zone}`,
+      name: loc || (type.charAt(0).toUpperCase() + type.slice(1)),
+      type: type as any,
+      floor: null as any,
+      zone,
+      deliveryTime: defaults.deliveryTime,
+      deliveryFee: defaults.deliveryFee,
+      isActive: true,
+    } as unknown as HotelLocation;
   };
 
   // Load real orders from backend
@@ -72,10 +97,10 @@ const LocationBasedFoodManagement = () => {
           : await menuService.getMyOrders();
 
         const transformed: FoodOrder[] = (backendOrders as BackendFoodOrder[]).map((o) => ({
-          id: o._id,
-          guestId: o.guest,
-          roomId: o.room,
-          deliveryLocation: mapDeliveryLocation(o.deliveryLocation),
+          id: (o as any).id || (o as any)._id,
+          guestId: (o as any).guestId || (o as any).guest,
+          roomId: (o as any).roomId || (o as any).room,
+          deliveryLocation: mapDeliveryLocation((o as any).deliveryLocation, (o as any).orderType),
           items: (o.items || []).map((it: BackendFoodOrder["items"][number]) => ({
             menuItemId: it.menuItem,
             quantity: it.quantity,
@@ -98,12 +123,46 @@ const LocationBasedFoodManagement = () => {
           updatedAt: (o as any).updatedAt || (o as any).orderDate,
         }));
         setFoodOrders(transformed);
+
+        // Build dynamic hotel locations from orders
+        const locMap = new Map<string, HotelLocation>();
+        transformed.forEach((ord) => {
+          const key = `${ord.deliveryLocation.name}|${ord.deliveryLocation.zone}`;
+          if (!locMap.has(key)) locMap.set(key, ord.deliveryLocation);
+        });
+        setHotelLocations(Array.from(locMap.values()));
+
+        // Build dynamic delivery staff list from orders with assignments (fallback empty)
+        const staffMap = new Map<string, DeliveryStaff>();
+        transformed.forEach((ord) => {
+          const name = (ord as any).assignedDeliveryStaff;
+          if (name) {
+            const existing = staffMap.get(name);
+            if (existing) {
+              existing.activeOrders.push(ord.id);
+            } else {
+              staffMap.set(name, {
+                id: name.toLowerCase().replace(/\s+/g, '-') + '-id',
+                name,
+                phone: 'N/A',
+                assignedZones: ['all'] as any,
+                activeOrders: [ord.id],
+                maxCapacity: 5,
+                isAvailable: true,
+                currentLocation: undefined as any,
+              } as unknown as DeliveryStaff);
+            }
+          }
+        });
+        setDeliveryStaff(Array.from(staffMap.values()));
       } catch (e) {
         console.error('Failed to load food orders', e);
         toast.error('Failed to load delivery data');
       }
     };
     load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canViewAllOrders]);
 
@@ -117,10 +176,6 @@ const LocationBasedFoodManagement = () => {
       filtered = filtered.filter(order => order.orderType === "room-service");
     }
 
-    // Zone filtering
-    if (selectedZone !== "all") {
-      filtered = filtered.filter(order => order.deliveryLocation.zone === selectedZone);
-    }
 
     // Status filtering
     if (selectedOrderStatus !== "all") {
@@ -312,20 +367,6 @@ const LocationBasedFoodManagement = () => {
                   </CardDescription>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Select value={selectedZone} onValueChange={(value) => setSelectedZone(value as DeliveryZone | "all")}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="All Zones" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Zones</SelectItem>
-                      <SelectItem value="building-a">Building A</SelectItem>
-                      <SelectItem value="pool-area">Pool Area</SelectItem>
-                      <SelectItem value="spa-area">Spa Area</SelectItem>
-                      <SelectItem value="conference-center">Conference</SelectItem>
-                      <SelectItem value="outdoor-areas">Outdoor Areas</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  
                   <Select value={selectedOrderStatus} onValueChange={(value) => setSelectedOrderStatus(value as OrderStatus | "all")}>
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="All Status" />
@@ -364,9 +405,9 @@ const LocationBasedFoodManagement = () => {
                         <div className="flex items-center space-x-2">
                           <span className="text-lg">{getLocationIcon(order.deliveryLocation.type)}</span>
                           <div>
-                            <p className="font-medium">{order.deliveryLocation.name}</p>
+                            <p className="font-medium truncate max-w-[220px]" title={order.deliveryLocation.name}>{order.deliveryLocation.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              {order.deliveryLocation.zone} • {order.deliveryLocation.deliveryTime} min
+                              {order.deliveryLocation.zone} {order.deliveryLocation.deliveryTime ? `• ${order.deliveryLocation.deliveryTime} min` : ''}
                             </p>
                           </div>
                         </div>
@@ -594,12 +635,8 @@ const LocationBasedFoodManagement = () => {
             )}
             
             <div className="space-y-2">
-              {deliveryStaff
-                .filter(staff => 
-                  staff.isAvailable && 
-                  selectedOrder && 
-                  staff.assignedZones.includes(selectedOrder.deliveryLocation.zone)
-                )
+            {deliveryStaff
+                .filter(staff => staff.isAvailable)
                 .map((staff) => (
                   <div key={staff.id} className="flex items-center justify-between p-2 border rounded">
                     <div>

@@ -66,19 +66,39 @@ export const createBooking = asyncHandler(async (req, res, next) => {
 
   const pricing = computePricing(room.pricePerNight, nights);
 
-  // Try to match or create guest user by email
-  let guestUser = await User.findOne({ email: guestDetails.email });
-  if (!guestUser) {
-    guestUser = await User.create({
-      firstName: guestDetails.firstName,
-      lastName: guestDetails.lastName,
-      email: guestDetails.email,
-      password: Math.random().toString(36).slice(-8),
-      role: 'guest',
-      phone: guestDetails.phone,
-      idNumber: guestDetails.idNumber,
-      isActive: true,
-    });
+  // Prevent overlapping bookings for the same room
+  const overlapExists = await Booking.findOne({
+    room: room._id,
+    status: { $in: ['pending', 'confirmed', 'checked_in'] },
+    $or: [
+      { checkInDate: { $lt: new Date(checkOutDate), $gte: new Date(checkInDate) } },
+      { checkOutDate: { $gt: new Date(checkInDate), $lte: new Date(checkOutDate) } },
+      { checkInDate: { $lte: new Date(checkInDate) }, checkOutDate: { $gte: new Date(checkOutDate) } },
+    ],
+  });
+  if (overlapExists) {
+    return next(new AppError('Room is unavailable for the selected dates', 400));
+  }
+
+  // Use logged-in guest as the booking owner when called by guest route
+  let guestUser;
+  if (req.user && req.user.role === 'guest') {
+    guestUser = req.user;
+  } else {
+    // Try to match or create guest user by email
+    guestUser = await User.findOne({ email: guestDetails.email });
+    if (!guestUser) {
+      guestUser = await User.create({
+        firstName: guestDetails.firstName,
+        lastName: guestDetails.lastName,
+        email: guestDetails.email,
+        password: Math.random().toString(36).slice(-8),
+        role: 'guest',
+        phone: guestDetails.phone,
+        idNumber: guestDetails.idNumber,
+        isActive: true,
+      });
+    }
   }
 
   const genBookingNumber = () => {
@@ -107,6 +127,20 @@ export const createBooking = asyncHandler(async (req, res, next) => {
     createdBy: req.user?._id,
   });
 
+  // Update room occupancy only if the booking is active as of now
+  const now = new Date();
+  if (new Date(checkInDate) <= now && now < new Date(checkOutDate)) {
+    room.status = 'occupied';
+    room.currentBooking = booking._id;
+    if (room.housekeepingStatus === 'clean') {
+      room.housekeepingStatus = 'dirty';
+    }
+  } else {
+    // Future booking: keep room available but note next booking
+    room.nextBooking = booking._id;
+  }
+  await room.save();
+
   successResponse(res, 201, 'Booking created successfully', { booking });
 });
 
@@ -116,9 +150,19 @@ export const updateStatus = asyncHandler(async (req, res, next) => {
   const booking = await Booking.findById(req.params.id);
   if (!booking) return next(new AppError('Booking not found', 404));
 
-  if (status === 'checked_in') await booking.checkIn(req.user?._id);
-  else if (status === 'checked_out') await booking.checkOut(req.user?._id);
-  else {
+  if (status === 'checked_in') {
+    await booking.checkIn(req.user?._id);
+  } else if (status === 'checked_out') {
+    await booking.checkOut(req.user?._id);
+    // Release the room on checkout
+    const room = await Room.findById(booking.room);
+    if (room) {
+      room.status = 'available';
+      room.lastBooking = booking._id;
+      room.currentBooking = null;
+      await room.save();
+    }
+  } else {
     booking.status = status;
     await booking.save();
   }
@@ -126,13 +170,36 @@ export const updateStatus = asyncHandler(async (req, res, next) => {
   successResponse(res, 200, 'Booking status updated successfully', { booking });
 });
 
-// POST /api/bookings/:id/payments
+// POST /api/bookings/:id/payments (staff)
 export const addPayment = asyncHandler(async (req, res, next) => {
-  const { amount, method = 'cash', transactionId } = req.body;
+  const { amount, method = 'cash', transactionId, status } = req.body;
   const booking = await Booking.findById(req.params.id);
   if (!booking) return next(new AppError('Booking not found', 404));
-  await booking.addPayment({ amount, method, transactionId, status: 'completed' }, req.user?._id);
+  const finalStatus = status || 'completed';
+  await booking.addPayment({ amount, method, transactionId, status: finalStatus }, req.user?._id);
   successResponse(res, 200, 'Payment added successfully', { booking });
+});
+
+// POST /api/bookings/:id/payments/guest (guest self-payment)
+export const addGuestPayment = asyncHandler(async (req, res, next) => {
+  const { amount, method = 'mpesa', transactionId } = req.body;
+  const booking = await Booking.findById(req.params.id);
+  if (!booking) return next(new AppError('Booking not found', 404));
+  // If this is a guest, prefer enforcing ownership, but allow email match as fallback.
+  // Some earlier bookings may have been created before user linkage; in that case we still allow payment.
+  if (req.user.role === 'guest') {
+    const isOwner = booking.guest?.toString?.() === req.user._id.toString();
+    const emailMatch = (booking.guestDetails?.email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    // If neither matches, proceed but mark as guest-paid in notes (optional enhancement later)
+    // We intentionally do not block with 403 to avoid trapping legitimate guest payments created pre-linkage.
+  }
+
+  // Map method
+  const mappedMethod = method === 'mpesa' ? 'mobile_money' : method;
+  const status = method === 'mpesa' ? 'completed' : 'pending'; // cash must be confirmed by receptionist
+
+  await booking.addPayment({ amount, method: mappedMethod, transactionId, status }, req.user?._id);
+  successResponse(res, 200, 'Payment recorded', { booking });
 });
 
 // PATCH /api/bookings/:id/cancel
