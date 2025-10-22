@@ -44,16 +44,21 @@ const FoodOrdering = () => {
   const [selectedLocationId, setSelectedLocationId] = useState<string>("");
   const [createDeliveryAddress, setCreateDeliveryAddress] = useState<string>("");
   const [menuSearchForCreate, setMenuSearchForCreate] = useState("");
+  const [orderPaymentMethod, setOrderPaymentMethod] = useState<"mpesa" | "cash">("mpesa");
+  const [orderMpesaTxId, setOrderMpesaTxId] = useState<string>("");
+  const [orderMpesaPhone, setOrderMpesaPhone] = useState<string>("");
 
   useEffect(() => {
+    let t: any;
     const load = async () => {
       try {
         setLoading(true);
-        const [itemsData, guestsData, orders] = await Promise.all([
-          menuService.getTransformedMenuItems(),
-          guestService.getTransformedGuests(),
-          menuService.getAllOrders(),
-        ]);
+        const menuP = menuService.getTransformedMenuItems();
+        const guestsP = guestService.getTransformedGuests();
+        const ordersP = (user?.role === 'admin' || user?.role === 'receptionist')
+          ? menuService.getAllOrders()
+          : menuService.getMyOrders();
+        const [itemsData, guestsData, orders] = await Promise.all([menuP, guestsP, ordersP]);
         setMenuItems(itemsData);
         setGuests(guestsData);
         setFoodOrders(orders as any);
@@ -64,10 +69,12 @@ const FoodOrdering = () => {
         setLoading(false);
       }
     };
-    load();
-    const t = setInterval(load, 5000); // simple realtime polling
-    return () => clearInterval(t);
-  }, []);
+    if (!isNewMenuItemOpen) {
+      load();
+      t = setInterval(load, 5000); // pause polling while modal is open to avoid focus loss
+    }
+    return () => { if (t) clearInterval(t); };
+  }, [isNewMenuItemOpen]);
 
   const filteredMenuItems = menuItems.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -130,6 +137,7 @@ const FoodOrdering = () => {
         orderType: createOrderType,
         deliveryLocation: createOrderType === 'delivery' ? createDeliveryAddress : selectedLocationId,
         guestId: selectedGuestId,
+        specialInstructions: `Payment: ${orderPaymentMethod === 'mpesa' ? `M-Pesa${orderMpesaTxId ? ` Tx:${orderMpesaTxId}` : ''}${orderMpesaPhone ? ` Phone:${orderMpesaPhone}` : ''}` : 'Cash'}`,
       });
       setFoodOrders(prev => [{
         id: (order as any)._id,
@@ -180,17 +188,7 @@ const FoodOrdering = () => {
     toast.success(`Order status updated to ${newStatus}`);
   };
 
-  const handleSaveMenuItem = async (formData: FormData) => {
-    const payload = {
-      name: formData.get("name") as string,
-      description: formData.get("description") as string,
-      price: parseInt(formData.get("price") as string),
-      category: formData.get("category") as string,
-      isAvailable: formData.get("isAvailable") === "true",
-      preparationTime: parseInt(formData.get("preparationTime") as string),
-      allergens: (formData.get("allergens") as string).split(",").map(a => a.trim()).filter(Boolean)
-    };
-
+  const handleSaveMenuItem = async (payload: any) => {
     try {
       if (editingItem) {
         const updated = await menuService.updateMenuItem(editingItem.id, payload);
@@ -203,12 +201,11 @@ const FoodOrdering = () => {
         setMenuItems(prev => [...prev, created]);
         toast.success("Menu item added successfully");
       }
+      setIsNewMenuItemOpen(false);
+      setEditingItem(null);
     } catch (e: any) {
       toast.error(e.message || 'Failed to save menu item');
     }
-    
-    setIsNewMenuItemOpen(false);
-    setEditingItem(null);
   };
 
   const handleDeleteMenuItem = async () => {
@@ -254,66 +251,54 @@ const FoodOrdering = () => {
     setIsDeleteDialogOpen(true);
   };
 
-  const MenuItemForm = () => {
-    const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      const fd = new FormData(e.currentTarget);
-      // Normalize checkbox to boolean presence
-      if (!fd.get('isAvailable')) {
-        fd.set('isAvailable', 'false');
+  const AddEditMenuModal = () => {
+    const [name, setName] = useState(editingItem?.name || "");
+    const [description, setDescription] = useState(editingItem?.description || "");
+    const [price, setPrice] = useState<number>(editingItem?.price || 0);
+    const [prepTime, setPrepTime] = useState<number>(editingItem?.preparationTime || 10);
+    const [category, setCategory] = useState<string>(editingItem?.category || 'mains');
+    const [allergens, setAllergens] = useState<string>((editingItem?.allergens || []).join(", "));
+    const [isAvailable, setIsAvailable] = useState<boolean>(editingItem?.isAvailable !== false);
+
+    const save = async () => {
+      if (!name || !description || !price || !prepTime) {
+        toast.error('Please fill all required fields');
+        return;
       }
-      await handleSaveMenuItem(fd);
+      await handleSaveMenuItem({
+        name,
+        description,
+        price: Number(price),
+        category,
+        isAvailable,
+        preparationTime: Number(prepTime),
+        allergens: allergens.split(',').map(a => a.trim()).filter(Boolean),
+      });
     };
 
     return (
-      <form onSubmit={onSubmit} className="space-y-4">
+      <div className="space-y-4">
         <div>
           <Label htmlFor="name">Item Name</Label>
-          <Input 
-            id="name" 
-            name="name" 
-            defaultValue={editingItem?.name}
-            required 
-          />
+          <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        
         <div>
           <Label htmlFor="description">Description</Label>
-          <Textarea 
-            id="description" 
-            name="description" 
-            defaultValue={editingItem?.description}
-            required 
-          />
+          <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
-        
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="price">Price (KES)</Label>
-            <Input 
-              id="price" 
-              name="price" 
-              type="number" 
-              defaultValue={editingItem?.price}
-              required 
-            />
+            <Input id="price" type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} />
           </div>
-          
           <div>
             <Label htmlFor="preparationTime">Prep Time (minutes)</Label>
-            <Input 
-              id="preparationTime" 
-              name="preparationTime" 
-              type="number" 
-              defaultValue={editingItem?.preparationTime}
-              required 
-            />
+            <Input id="preparationTime" type="number" value={prepTime} onChange={(e) => setPrepTime(Number(e.target.value))} />
           </div>
         </div>
-        
         <div>
           <Label htmlFor="category">Category</Label>
-          <Select name="category" defaultValue={editingItem?.category}>
+          <Select value={category} onValueChange={(v) => setCategory(v)}>
             <SelectTrigger>
               <SelectValue placeholder="Select category" />
             </SelectTrigger>
@@ -328,52 +313,19 @@ const FoodOrdering = () => {
             </SelectContent>
           </Select>
         </div>
-        
-        <div>
-          <Label htmlFor="ingredients">Ingredients (comma separated)</Label>
-          <Input 
-            id="ingredients" 
-            name="ingredients" 
-            defaultValue={editingItem?.ingredients.join(", ")}
-          />
-        </div>
-        
         <div>
           <Label htmlFor="allergens">Allergens (comma separated)</Label>
-          <Input 
-            id="allergens" 
-            name="allergens" 
-            defaultValue={editingItem?.allergens?.join(", ")}
-          />
+          <Input id="allergens" value={allergens} onChange={(e) => setAllergens(e.target.value)} />
         </div>
-        
         <div className="flex items-center space-x-2">
-          <input 
-            type="checkbox" 
-            id="isAvailable" 
-            name="isAvailable" 
-            value="true"
-            defaultChecked={editingItem?.isAvailable !== false}
-          />
+          <input type="checkbox" id="isAvailable" checked={isAvailable} onChange={(e) => setIsAvailable(e.target.checked)} />
           <Label htmlFor="isAvailable">Available</Label>
         </div>
-        
         <div className="flex justify-end space-x-2">
-          <Button 
-            type="button" 
-            variant="outline" 
-            onClick={() => {
-              setIsNewMenuItemOpen(false);
-              setEditingItem(null);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button type="submit">
-            {editingItem ? "Update Item" : "Add Item"}
-          </Button>
+          <Button type="button" variant="outline" onClick={() => { setIsNewMenuItemOpen(false); setEditingItem(null); }}>Cancel</Button>
+          <Button type="button" onClick={save}>{editingItem ? 'Update Item' : 'Add Item'}</Button>
         </div>
-      </form>
+      </div>
     );
   };
 
@@ -419,7 +371,11 @@ const FoodOrdering = () => {
                           Add Menu Item
                         </Button>
                       </DialogTrigger>
-                      <DialogContent className="max-w-md">
+                      <DialogContent 
+                        className="max-w-md"
+                        onEscapeKeyDown={(e) => e.preventDefault()}
+                        onInteractOutside={(e) => e.preventDefault()}
+                      >
                         <DialogHeader>
                           <DialogTitle>
                             {editingItem ? "Edit Menu Item" : "Add New Menu Item"}
@@ -428,7 +384,7 @@ const FoodOrdering = () => {
                             Fill in the details for the menu item.
                           </DialogDescription>
                         </DialogHeader>
-                        <MenuItemForm />
+                        <AddEditMenuModal />
                       </DialogContent>
                     </Dialog>
                   )}
@@ -586,11 +542,13 @@ const FoodOrdering = () => {
                                 <Label>Guest</Label>
                                 <Select value={selectedGuestId} onValueChange={(v) => setSelectedGuestId(v)}>
                                   <SelectTrigger>
-                                    <SelectValue placeholder="Select guest" />
+                                    <SelectValue placeholder="Select guest by email" />
                                   </SelectTrigger>
                                   <SelectContent className="max-h-64">
                                     {guests.map((g) => (
-                                      <SelectItem key={g.id} value={g.id}>{g.name || `${g.firstName} ${g.lastName}`} {g.roomId ? `(Room ${g.roomId})` : ""}</SelectItem>
+                                      <SelectItem key={g.id} value={g.id}>
+                                        {g.email} — {g.name}
+                                      </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
@@ -713,6 +671,33 @@ const FoodOrdering = () => {
                                 <div className="flex justify-between"><span>Delivery Fee</span><span>KES {getSelectedLocation()!.deliveryFee.toLocaleString()}</span></div>
                               )}
                               <div className="flex justify-between font-semibold"><span>Total</span><span>KES {(getCreateOrderSubtotal() + (getSelectedLocation()?.deliveryFee || 0)).toLocaleString()}</span></div>
+                              {/* Payment Options */}
+                              <div className="grid grid-cols-2 gap-2 mt-3">
+                                <div>
+                                  <Label className="text-xs">Payment</Label>
+                                  <Select value={orderPaymentMethod} onValueChange={(v) => setOrderPaymentMethod(v as any)}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="mpesa">M-Pesa</SelectItem>
+                                      <SelectItem value="cash">Cash</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                {orderPaymentMethod === 'mpesa' && (
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <Label htmlFor="order-mpesa" className="text-xs">M-Pesa TxID (optional)</Label>
+                                      <Input id="order-mpesa" value={orderMpesaTxId} onChange={(e) => setOrderMpesaTxId(e.target.value)} className="h-8 text-xs" placeholder="ABC123XYZ" />
+                                    </div>
+                                    <div>
+                                      <Label htmlFor="order-mpesa-phone" className="text-xs">M-Pesa Phone</Label>
+                                      <Input id="order-mpesa-phone" value={orderMpesaPhone} onChange={(e) => setOrderMpesaPhone(e.target.value)} className="h-8 text-xs" placeholder="07XXXXXXXX" />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                               <Button className="w-full mt-2" onClick={handleCreateOrder} disabled={!selectedGuestId || createOrderCart.length===0}>Create Order</Button>
                             </div>
                           </div>
@@ -746,9 +731,30 @@ const FoodOrdering = () => {
                           <Badge variant="outline">{order.orderType}</Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className="truncate max-w-[180px]" title={order.deliveryLocation || 'N/A'}>
-                            {order.deliveryLocation || 'N/A'}
-                          </Badge>
+                          {(!canManageOrders && order.orderType === 'delivery') ? (
+                            <div className="flex gap-2 items-center">
+                              <Input
+                                className="h-8"
+                                placeholder="Enter delivery location"
+                                defaultValue={order.deliveryLocation || ''}
+                                onBlur={async (e) => {
+                                  const val = e.target.value.trim();
+                                  if (!val || val === order.deliveryLocation) return;
+                                  try {
+                                    await menuService.updateOrderLocation(order.id, val);
+                                    setFoodOrders(prev => prev.map(o => o.id === order.id ? { ...o, deliveryLocation: val } : o));
+                                    toast.success('Delivery location updated');
+                                  } catch (err: any) {
+                                    toast.error(err.message || 'Failed to update location');
+                                  }
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <Badge variant="secondary" className="truncate max-w-[180px]" title={order.deliveryLocation || 'N/A'}>
+                              {order.deliveryLocation || 'N/A'}
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">

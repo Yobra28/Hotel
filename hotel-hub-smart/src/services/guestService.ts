@@ -51,16 +51,16 @@ export interface CreateGuestData {
 
 class GuestService {
   // Get all guests (admin/receptionist only)
-  async getAllGuests(): Promise<Guest[]> {
+  async getAllGuests(search?: string): Promise<Guest[]> {
     try {
-      const response = await api.get('/guests');
+      const response = await api.get('/guests', { params: search ? { search } : undefined });
       return response.data.data.guests || [];
     } catch (error) {
       // Fallback: some environments expose guests via admin staff endpoint when role=guest
       try {
-        const fallback = await api.get('/admin/staff', { params: { role: 'guest', limit: 200 } });
+        const fallback = await api.get('/admin/staff', { params: { role: 'guest', limit: 200, ...(search ? { search } : {}) } });
         const items = (fallback.data.data?.items || fallback.data.data?.staff || fallback.data.data?.guests || []) as any[];
-        return items;
+        return items as any;
       } catch (e) {
         console.error('Error fetching guests:', error);
         return [];

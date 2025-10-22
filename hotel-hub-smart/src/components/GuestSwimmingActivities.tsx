@@ -109,14 +109,35 @@ const GuestSwimmingActivities = () => {
 
   const handleSubmitBooking = async (formData: FormData) => {
     try {
+      const poolId = formData.get('poolId') as string;
+      const activityId = (formData.get('activityId') as string) || undefined;
+      const bookingDate = formData.get('date') as string;
+      const startTime = formData.get('startTime') as string;
+      const endTime = formData.get('endTime') as string;
+      const numberOfParticipants = parseInt(formData.get('participants') as string);
+      const specialRequests = (formData.get('specialRequests') as string) || undefined;
+
+      if (!poolId) {
+        toast.error('Please select a pool or activity again.');
+        return;
+      }
+      if (!bookingDate) {
+        toast.error('Please select a date.');
+        return;
+      }
+      if (!activityId && (!startTime || !endTime)) {
+        toast.error('Please select start and end time for pool access.');
+        return;
+      }
+
       const bookingData = {
-        poolId: formData.get('poolId') as string,
-        activityId: formData.get('activityId') as string || undefined,
-        bookingDate: formData.get('date') as string,
-        startTime: formData.get('startTime') as string,
-        endTime: formData.get('endTime') as string,
-        numberOfParticipants: parseInt(formData.get('participants') as string),
-        specialRequests: formData.get('specialRequests') as string || undefined
+        poolId,
+        activityId,
+        bookingDate,
+        startTime,
+        endTime,
+        numberOfParticipants,
+        specialRequests,
       };
 
       await poolService.createPoolBooking(bookingData);
@@ -127,7 +148,8 @@ const GuestSwimmingActivities = () => {
       setSelectedDate(undefined);
     } catch (error: any) {
       console.error('Error creating pool booking:', error);
-      toast.error(error.message || 'Failed to create reservation');
+      const serverMsg = error?.response?.data?.error?.message || error?.response?.data?.message;
+      toast.error(serverMsg || error.message || 'Failed to create reservation');
     }
   };
 
@@ -232,10 +254,14 @@ const GuestSwimmingActivities = () => {
                   <Button 
                     className="w-full mt-4" 
                     onClick={() => handleBookPool(pool)}
-                    disabled={pool.currentOccupancy >= pool.capacity}
+                    disabled={pool.status !== "open" || (pool.capacity > 0 && pool.currentOccupancy >= pool.capacity)}
                   >
                     <Waves className="mr-2 h-4 w-4" />
-                    {pool.currentOccupancy >= pool.capacity ? "Pool Full" : "Book Pool Access"}
+                    {pool.status !== "open"
+                      ? "Pool Unavailable"
+                      : (pool.capacity > 0 && pool.currentOccupancy >= pool.capacity)
+                        ? "Pool Full"
+                        : "Book Pool Access"}
                   </Button>
                 </div>
               </CardContent>
@@ -351,10 +377,14 @@ const GuestSwimmingActivities = () => {
                   <Button 
                     className="w-full" 
                     onClick={() => handleBookActivity(activity)}
-                    disabled={activity.currentParticipants >= activity.capacity}
+                    disabled={!activity.isActive || (activity.capacity > 0 && activity.currentParticipants >= activity.capacity)}
                   >
                     <Users className="mr-2 h-4 w-4" />
-                    {activity.currentParticipants >= activity.capacity ? "Activity Full" : "Join Activity"}
+                    {!activity.isActive
+                      ? "Activity Inactive"
+                      : (activity.capacity > 0 && activity.currentParticipants >= activity.capacity)
+                        ? "Activity Full"
+                        : "Join Activity"}
                   </Button>
                 </div>
               </CardContent>
@@ -386,8 +416,15 @@ const GuestSwimmingActivities = () => {
             </DialogDescription>
           </DialogHeader>
           
-          <form action={handleSubmitBooking} className="space-y-4">
-            <input type="hidden" name="poolId" value={selectedPool?.id || ""} />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget as HTMLFormElement);
+              handleSubmitBooking(fd);
+            }}
+            className="space-y-4"
+          >
+            <input type="hidden" name="poolId" value={selectedActivity ? selectedActivity.poolId : (selectedPool?.id || "")} />
             <input type="hidden" name="activityId" value={selectedActivity?.id || ""} />
             
             <div>
@@ -417,6 +454,7 @@ const GuestSwimmingActivities = () => {
               </Popover>
               <input 
                 type="hidden" 
+                id="date"
                 name="date" 
                 value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""} 
               />
@@ -444,9 +482,14 @@ const GuestSwimmingActivities = () => {
                 name="participants" 
                 type="number" 
                 min="1" 
-                max={selectedActivity ? 
-                  (selectedActivity.capacity - selectedActivity.currentParticipants) : 
-                  (selectedPool ? selectedPool.capacity - selectedPool.currentOccupancy : 1)
+                {
+                  ...(selectedActivity
+                    ? (selectedActivity.capacity > 0
+                        ? { max: Math.max(1, selectedActivity.capacity - selectedActivity.currentParticipants) }
+                        : {})
+                    : (selectedPool && selectedPool.capacity > 0
+                        ? { max: Math.max(1, selectedPool.capacity - selectedPool.currentOccupancy) }
+                        : {}))
                 }
                 defaultValue="1"
                 required 

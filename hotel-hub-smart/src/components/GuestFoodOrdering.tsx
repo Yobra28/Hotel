@@ -104,22 +104,6 @@ const GuestFoodOrdering = () => {
     return cart.reduce((total, item) => total + item.quantity, 0);
   };
 
-  // Live location update for most recent order
-  const [lastOrderId, setLastOrderId] = useState<string>("");
-  const [liveLocation, setLiveLocation] = useState<string>("");
-  const handleUpdateLocation = async () => {
-    if (!lastOrderId || !liveLocation.trim()) {
-      toast.error('No recent order or empty location');
-      return;
-    }
-    try {
-      await menuService.updateOrderLocation(lastOrderId, liveLocation.trim());
-      toast.success('Location updated');
-      setLiveLocation("");
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to update location');
-    }
-  };
 
   const handlePlaceOrder = async () => {
     if (cart.length === 0) {
@@ -144,8 +128,7 @@ const GuestFoodOrdering = () => {
         return;
       }
 
-      const created = await menuService.createOrder(orderData);
-      setLastOrderId((created as any)._id || created?.id || "");
+      await menuService.createOrder(orderData);
       toast.success("Order placed successfully! You'll receive a confirmation shortly.");
       setCart([]);
       setIsCheckoutOpen(false);
@@ -290,25 +273,6 @@ const GuestFoodOrdering = () => {
           </DialogContent>
         </Dialog>
       </div>
-
-      {/* Live Location (for latest order) */}
-      <Card className="mb-4">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Live Delivery Location</CardTitle>
-          <CardDescription>Share or adjust your current location for your latest order.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input
-              placeholder="e.g., Room 305, Pool Seat A12, Lobby Sofa 3"
-              value={liveLocation}
-              onChange={(e) => setLiveLocation(e.target.value)}
-            />
-            <Button onClick={handleUpdateLocation} disabled={!lastOrderId}>Update Location</Button>
-            <div className="text-xs text-muted-foreground flex items-center">Order: {lastOrderId ? lastOrderId : 'No recent order'}</div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Category Filter */}
       <div className="flex flex-wrap gap-2">

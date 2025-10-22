@@ -9,9 +9,6 @@ export default defineConfig(({ mode }) => ({
     host: "0.0.0.0", // Allow external connections (ngrok)
     port: 3000,
     strictPort: false, // Allow Vite to find an available port
-    hmr: {
-      port: 3000, // Ensure HMR works with ngrok
-    },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

@@ -23,6 +23,8 @@ const Bookings = () => {
   const [bookings, setBookings] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [guests, setGuests] = useState<any[]>([]);
+  const [guestEmailQuery, setGuestEmailQuery] = useState<string>("");
+  const [guestEmailOptions, setGuestEmailOptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -31,27 +33,32 @@ const Bookings = () => {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   
   const [formData, setFormData] = useState({
-    guestId: "",
     roomId: "",
     checkIn: "",
     checkOut: "",
-    numberOfGuests: {
-      adults: 1,
-      children: 0
-    },
-    guestDetails: {
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      idNumber: ""
-    }
+    guestEmail: "",
+    paymentMethod: "mpesa" as "mpesa" | "cash",
+    mpesaTxId: "",
+    mpesaPhone: "",
   });
 
   // Load data on component mount
   useEffect(() => {
     loadData();
   }, []);
+
+  // Live guest email search
+  useEffect(() => {
+    let t: any;
+    const run = async () => {
+      const res = await guestService.getAllGuests(guestEmailQuery);
+      setGuestEmailOptions(res.map(g => ({ id: g.id, email: g.email, name: g.name })));
+    };
+    if (isAddDialogOpen) {
+      t = setTimeout(run, 300);
+    }
+    return () => t && clearTimeout(t);
+  }, [guestEmailQuery, isAddDialogOpen]);
 
   const loadData = async () => {
     try {
@@ -86,11 +93,8 @@ const Bookings = () => {
   });
 
   const handleAddBooking = async () => {
-    if (!formData.roomId || !formData.checkIn || !formData.checkOut || 
-        !formData.guestDetails.firstName || !formData.guestDetails.lastName || 
-        !formData.guestDetails.email || !formData.guestDetails.phone || 
-        !formData.guestDetails.idNumber) {
-      toast.error("Please fill in all required fields");
+    if (!formData.roomId || !formData.checkIn || !formData.checkOut || !formData.guestEmail) {
+      toast.error("Please select room, dates and guest email");
       return;
     }
 
@@ -101,21 +105,40 @@ const Bookings = () => {
         const rnd = Math.floor(1000 + Math.random()*9000);
         return `BK-${ymd}-${rnd}`;
       };
+
+      const guest = guests.find(g => (g.email || '').toLowerCase() === formData.guestEmail.toLowerCase());
+
       const bookingData = {
         roomId: formData.roomId,
         checkInDate: formData.checkIn,
         checkOutDate: formData.checkOut,
-        numberOfGuests: formData.numberOfGuests,
-        guestDetails: formData.guestDetails,
+        numberOfGuests: { adults: 1, children: 0 },
+        guestDetails: {
+          email: formData.guestEmail,
+          firstName: guest?.firstName,
+          lastName: guest?.lastName,
+        },
         bookingNumber: genBookingNumber(),
         source: 'walk_in'
       } as any;
 
-      await bookingService.createBooking(bookingData);
-      await loadData(); // Refresh the data
+      const created = await bookingService.createBooking(bookingData);
+
+      // Immediately record payment via staff endpoint
+      const method = formData.paymentMethod === 'mpesa' ? 'mobile_money' : 'cash';
+      const payment = await bookingService.addPayment(created._id, {
+        amount: created.pricing?.totalAmount || 0,
+        method: method as any,
+        transactionId: formData.paymentMethod === 'mpesa' 
+          ? [formData.mpesaTxId, formData.mpesaPhone].filter(Boolean).join('|') || undefined 
+          : undefined,
+        status: 'completed',
+      } as any);
+
+      await loadData();
       setIsAddDialogOpen(false);
       resetForm();
-      toast.success("Booking created successfully!");
+      toast.success("Booking created and payment recorded!");
     } catch (error: any) {
       console.error('Error creating booking:', error);
       toast.error(error.message || 'Failed to create booking');
@@ -190,42 +213,20 @@ const Bookings = () => {
 
   const resetForm = () => {
     setFormData({
-      guestId: "",
       roomId: "",
       checkIn: "",
       checkOut: "",
-      numberOfGuests: {
-        adults: 1,
-        children: 0
-      },
-      guestDetails: {
-        firstName: "",
-        lastName: "",
-        email: "",
-        phone: "",
-        idNumber: ""
-      }
+      guestEmail: "",
     });
   };
 
   const openEditDialog = (booking: any) => {
     setSelectedBooking(booking);
     setFormData({
-      guestId: booking.guestId,
       roomId: booking.roomId,
       checkIn: booking.checkIn,
       checkOut: booking.checkOut,
-      numberOfGuests: {
-        adults: booking.adults || 1,
-        children: booking.children || 0
-      },
-      guestDetails: booking.guestDetails || {
-        firstName: "",
-        lastName: "",
-        email: "",
-        phone: "",
-        idNumber: ""
-      }
+      guestEmail: booking.guestDetails?.email || "",
     });
     setIsEditDialogOpen(true);
   };
@@ -278,7 +279,7 @@ const Bookings = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="checkIn">Check-in Date</Label>
                       <Input
@@ -300,85 +301,59 @@ const Bookings = () => {
                   </div>
                   
                   {/* Guest Details */}
-                  <div className="space-y-4 border-t pt-4">
-                    <h4 className="font-medium">Guest Information</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="firstName">First Name</Label>
-                        <Input
-                          id="firstName"
-                          value={formData.guestDetails.firstName}
-                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, firstName: e.target.value}})}
-                          placeholder="First name"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lastName">Last Name</Label>
-                        <Input
-                          id="lastName"
-                          value={formData.guestDetails.lastName}
-                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, lastName: e.target.value}})}
-                          placeholder="Last name"
-                        />
-                      </div>
-                    </div>
+                <div className="space-y-4 border-t pt-4">
+                  <h4 className="font-medium">Guest</h4>
+                  <div className="space-y-2">
+                    <Label htmlFor="guestEmail">Guest Email</Label>
+                    <Input
+                      id="guestEmail"
+                      type="email"
+                      placeholder="Enter guest email"
+                      value={formData.guestEmail}
+                      onChange={(e) => { setFormData({ ...formData, guestEmail: e.target.value }); setGuestEmailQuery(e.target.value); }}
+                      list="guest-emails"
+                    />
+                    <datalist id="guest-emails">
+                      {guestEmailOptions.map((g) => (
+                        <option key={g.id} value={g.email}>{g.name}</option>
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+                {/* Payment */}
+                <div className="space-y-4 border-t pt-4">
+                  <h4 className="font-medium">Payment</h4>
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.guestDetails.email}
-                        onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, email: e.target.value}})}
-                        placeholder="guest@email.com"
-                      />
+                      <Label htmlFor="paymentMethod">Method</Label>
+                      <Select value={formData.paymentMethod} onValueChange={(value) => setFormData({ ...formData, paymentMethod: value as any })}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="mpesa">M-Pesa</SelectItem>
+                          <SelectItem value="cash">Cash</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Phone</Label>
-                        <Input
-                          id="phone"
-                          value={formData.guestDetails.phone}
-                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, phone: e.target.value}})}
-                          placeholder="+254 712 345 678"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="idNumber">ID Number</Label>
-                        <Input
-                          id="idNumber"
-                          value={formData.guestDetails.idNumber}
-                          onChange={(e) => setFormData({...formData, guestDetails: {...formData.guestDetails, idNumber: e.target.value}})}
-                          placeholder="12345678"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="adults">Adults</Label>
-                        <Input
-                          id="adults"
-                          type="number"
-                          min="1"
-                          value={formData.numberOfGuests.adults}
-                          onChange={(e) => setFormData({...formData, numberOfGuests: {...formData.numberOfGuests, adults: parseInt(e.target.value) || 1}})}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="children">Children</Label>
-                        <Input
-                          id="children"
-                          type="number"
-                          min="0"
-                          value={formData.numberOfGuests.children}
-                          onChange={(e) => setFormData({...formData, numberOfGuests: {...formData.numberOfGuests, children: parseInt(e.target.value) || 0}})}
-                        />
-                      </div>
-                    </div>
+                    {formData.paymentMethod === 'mpesa' && (
+                      <>
+                        <div className="space-y-2">
+                          <Label htmlFor="mpesaTxId">M-Pesa Transaction ID (optional)</Label>
+                          <Input id="mpesaTxId" value={formData.mpesaTxId} onChange={(e) => setFormData({ ...formData, mpesaTxId: e.target.value })} placeholder="ABC123XYZ" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="mpesaPhone">M-Pesa Phone Number</Label>
+                          <Input id="mpesaPhone" value={formData.mpesaPhone} onChange={(e) => setFormData({ ...formData, mpesaPhone: e.target.value })} placeholder="e.g., 07XXXXXXXX" />
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="flex gap-2 pt-4">
-                    <Button onClick={handleAddBooking} className="flex-1">Create Booking</Button>
-                    <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                  </div>
+                </div>
+                <div className="flex gap-2 pt-4">
+                  <Button onClick={handleAddBooking} className="flex-1">Create Booking</Button>
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+                </div>
                 </div>
               </DialogContent>
             </Dialog>

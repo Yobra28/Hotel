@@ -166,7 +166,28 @@ class PoolService {
       const response = await api.post('/bookings/pools', bookingData);
       return response.data.data.booking;
     } catch (error: any) {
-      throw new Error(error.response?.data?.error?.message || 'Failed to create pool booking');
+      const msg = error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || 'Failed to create pool booking';
+      throw new Error(msg);
+    }
+  }
+
+  // Guest payment for pool booking
+  async addGuestPoolPayment(bookingId: string, payload: { amount: number; method: 'mpesa' | 'cash'; transactionId?: string }): Promise<PoolBooking> {
+    try {
+      const response = await api.post(`/bookings/pools/${bookingId}/payments/guest`, payload);
+      return response.data.data.booking;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error?.message || 'Failed to pay for pool booking');
+    }
+  }
+
+  // Staff payment for pool booking
+  async addPoolPayment(bookingId: string, payload: { amount: number; method: 'cash' | 'card' | 'bank_transfer' | 'mobile_money' | 'online'; transactionId?: string; status?: 'pending' | 'completed' | 'failed' | 'refunded' }): Promise<PoolBooking> {
+    try {
+      const response = await api.post(`/bookings/pools/${bookingId}/payments`, payload);
+      return response.data.data.booking;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error?.message || 'Failed to record payment');
     }
   }
 

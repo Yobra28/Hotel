@@ -236,32 +236,36 @@ class RoomService {
     }
   }
 
-  // Create a new room - will first test endpoints to find the right one
+  // Create a new room (admin/receptionist)
   async createRoom(roomData: any): Promise<Room> {
     try {
-      // First test endpoints to see what's available
-      await this.testBackendEndpoints();
-      
-      // Start with minimal required data and build up
       const backendRoomData: any = {
         roomNumber: roomData.number.toString(),
         type: this.mapFrontendTypeToBackend(roomData.type),
         floor: parseInt(roomData.floor.toString()),
         pricePerNight: parseInt(roomData.price.toString()),
         status: roomData.status || 'available',
-        isActive: true
+        isActive: true,
       };
 
-      // Add optional fields if they exist
       if (roomData.capacity) {
         backendRoomData.capacity = {
           adults: Math.max(1, Math.floor(parseInt(roomData.capacity) * 0.7)),
-          children: Math.max(0, Math.floor(parseInt(roomData.capacity) * 0.3))
+          children: Math.max(0, Math.floor(parseInt(roomData.capacity) * 0.3)),
         };
       }
 
-      // Add other fields with defaults
-      backendRoomData.category = roomData.category || 'Standard';
+      // Derive backend category from provided value or room type; backend expects lowercase enum
+      const derivedCategory = (roomData.category
+        ? String(roomData.category).toLowerCase()
+        : ((): string => {
+            const t = String(this.mapFrontendTypeToBackend(roomData.type));
+            if (t === 'Business Suite') return 'suite';
+            if (t === 'Premium Deluxe') return 'deluxe';
+            if (t === 'Presidential') return 'presidential';
+            return 'standard';
+          })());
+      backendRoomData.category = derivedCategory;
       backendRoomData.size = roomData.size || 25;
       backendRoomData.bedType = roomData.bedType || 'Queen';
       backendRoomData.numberOfBeds = roomData.numberOfBeds || 1;
@@ -274,53 +278,15 @@ class RoomService {
       backendRoomData.accessibility = {
         wheelchairAccessible: false,
         hearingImpaired: false,
-        visuallyImpaired: false
+        visuallyImpaired: false,
       };
-      
-      console.log('Creating room with data:', JSON.stringify(backendRoomData, null, 2));
-      
-      // Try different endpoints until one works
-      const endpointsToTry = ['/rooms', '/room', '/accommodation/rooms', '/hotel/rooms', '/properties/rooms'];
-      let lastError: any;
-      
-      for (const endpoint of endpointsToTry) {
-        try {
-          console.log(`Trying to create room via ${endpoint}...`);
-          const response = await api.post(endpoint, backendRoomData);
-          console.log(`✅ Room created successfully via ${endpoint}:`, response.data);
-          return response.data.data.room || response.data.room || response.data;
-        } catch (error: any) {
-          console.log(`❌ ${endpoint} failed:`, error.response?.status, error.response?.data?.message || error.message);
-          lastError = error;
-          continue;
-        }
-      }
-      
-      // If we get here, all endpoints failed
-      throw lastError;
-      
+
+      const response = await api.post('/rooms', backendRoomData);
+      return response.data.data.room;
     } catch (error: any) {
-      console.error('All room creation attempts failed. Full error object:', error);
-      console.error('Error response:', error.response);
-      console.error('Error response data:', error.response?.data);
-      console.error('Error response status:', error.response?.status);
-      
-      // Handle different error response formats
-      let errorMessage = 'Failed to create room - no working endpoints found';
-      
-      if (error.response?.status === 404) {
-        errorMessage = 'Room management endpoints are not implemented on the backend server yet';
-      } else if (error.response?.data) {
-        const responseData = error.response.data;
-        errorMessage = responseData.error?.message || 
-                      responseData.message || 
-                      responseData.error || 
-                      (typeof responseData === 'string' ? responseData : errorMessage);
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      throw new Error(errorMessage);
+      const responseData = error.response?.data;
+      const message = responseData?.error?.message || responseData?.message || error.message || 'Failed to create room';
+      throw new Error(message);
     }
   }
 

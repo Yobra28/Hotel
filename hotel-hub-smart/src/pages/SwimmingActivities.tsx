@@ -20,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import poolService, { type SwimmingActivity as BackendSwimmingActivity, type PoolFacility as BackendPoolFacility, type PoolBooking as BackendPoolBooking } from "@/services/poolService";
+import guestService from "@/services/guestService";
 import { 
   mockPoolEquipment,
   PoolFacility, 
@@ -70,6 +71,22 @@ const SwimmingActivities = () => {
   // Reservation Management
   const [deletingReservation, setDeletingReservation] = useState<PoolReservation | null>(null);
   const [isReservationDeleteOpen, setIsReservationDeleteOpen] = useState(false);
+
+  // Guest email suggestions for reservation dialog
+  const [guestEmailQuery, setGuestEmailQuery] = useState("");
+  const [guestEmailOptions, setGuestEmailOptions] = useState<any[]>([]);
+
+  useEffect(() => {
+    let t: any;
+    const run = async () => {
+      const res = await guestService.getAllGuests(guestEmailQuery);
+      setGuestEmailOptions(res.map((g: any) => ({ id: g.id, email: g.email, name: g.name })));
+    };
+    if (isNewReservationOpen) {
+      t = setTimeout(run, 300);
+    }
+    return () => t && clearTimeout(t);
+  }, [guestEmailQuery, isNewReservationOpen]);
 
   useEffect(() => {
     const load = async () => {
@@ -179,14 +196,22 @@ const SwimmingActivities = () => {
     try {
       const payload = {
         poolId: formData.get("poolId") as string,
-        activityId: (formData.get("activityId") as string) || undefined,
+        activityId: undefined,
         bookingDate: formData.get("date") as string,
         startTime: formData.get("startTime") as string,
         endTime: formData.get("endTime") as string,
-        numberOfParticipants: parseInt(formData.get("participants") as string),
-        specialRequests: (formData.get("specialRequests") as string) || undefined,
-      };
+        numberOfParticipants: 1,
+      } as any;
       const created = await poolService.createPoolBooking(payload as any);
+      // Record payment immediately (staff)
+      try {
+        await poolService.addPoolPayment(created._id, {
+          amount: created.totalAmount,
+          method: 'mobile_money',
+          transactionId: [formData.get("mpesaTxId") as string, formData.get("mpesaPhone") as string].filter(Boolean).join('|') || undefined,
+          status: 'completed',
+        } as any);
+      } catch (e) { /* ignore payment failure here; UI will still show reservation */ }
       const newReservation: PoolReservation = {
         id: created._id,
         guestId: created.guest,
@@ -941,10 +966,30 @@ const SwimmingActivities = () => {
                               Book a pool session for a guest.
                             </DialogDescription>
                           </DialogHeader>
-                          <form action={handleCreateReservation} className="space-y-4">
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              const fd = new FormData(e.currentTarget as HTMLFormElement);
+                              handleCreateReservation(fd);
+                            }}
+                            className="space-y-4"
+                          >
                             <div>
-                              <Label htmlFor="guestId">Guest ID</Label>
-                              <Input id="guestId" name="guestId" required />
+                              <Label htmlFor="guestEmail">Guest Email</Label>
+                              <Input 
+                                id="guestEmail" 
+                                name="guestEmail" 
+                                type="email" 
+                                placeholder="Enter guest email" 
+                                onChange={(e) => setGuestEmailQuery(e.target.value)}
+                                list="swim-guest-emails" 
+                                required 
+                              />
+                              <datalist id="swim-guest-emails">
+                                {guestEmailOptions.map((g) => (
+                                  <option key={g.id} value={g.email}>{g.name}</option>
+                                ))}
+                              </datalist>
                             </div>
                             
                             <div>
@@ -962,22 +1007,7 @@ const SwimmingActivities = () => {
                                 </SelectContent>
                               </Select>
                             </div>
-                            
-                            <div>
-                              <Label htmlFor="reservationType">Type</Label>
-                              <Select name="reservationType" required>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="pool-access">Pool Access</SelectItem>
-                                  <SelectItem value="activity">Activity</SelectItem>
-                                  <SelectItem value="private-event">Private Event</SelectItem>
-                                  <SelectItem value="lane-swimming">Lane Swimming</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            
+
                             <div>
                               <Label htmlFor="date">Date</Label>
                               <Popover>
@@ -1004,12 +1034,13 @@ const SwimmingActivities = () => {
                               </Popover>
                               <input 
                                 type="hidden" 
+                                id="date"
                                 name="date" 
                                 value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""} 
                               />
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <Label htmlFor="startTime">Start Time</Label>
                                 <Input id="startTime" name="startTime" type="time" required />
@@ -1020,14 +1051,16 @@ const SwimmingActivities = () => {
                               </div>
                             </div>
                             
-                            <div>
-                              <Label htmlFor="participants">Participants</Label>
-                              <Input id="participants" name="participants" type="number" min="1" required />
-                            </div>
-                            
-                            <div>
-                              <Label htmlFor="specialRequests">Special Requests</Label>
-                              <Textarea id="specialRequests" name="specialRequests" />
+                            {/* Payment */}
+                            <div className="grid grid-cols-1 gap-2">
+                              <div>
+                                <Label htmlFor="mpesaPhone">M-Pesa Phone Number</Label>
+                                <Input id="mpesaPhone" name="mpesaPhone" placeholder="07XXXXXXXX" required />
+                              </div>
+                              <div>
+                                <Label htmlFor="mpesaTxId">M-Pesa Transaction ID (optional)</Label>
+                                <Input id="mpesaTxId" name="mpesaTxId" placeholder="ABC123XYZ" />
+                              </div>
                             </div>
                             
                             <div className="flex justify-end space-x-2">
@@ -1042,8 +1075,8 @@ const SwimmingActivities = () => {
                         </DialogContent>
                       </Dialog>
                     )}
+                    </div>
                   </div>
-                </div>
               </CardHeader>
               <CardContent>
                 <Table>

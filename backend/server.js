@@ -97,7 +97,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/guests', guestRoutes);
 app.use('/api/rooms', roomRoutes);
-app.use('/api/bookings', bookingRoutes);
+// Mount pool booking routes BEFORE general booking routes to avoid staff-only middleware blocking guest access
+app.use('/api/bookings', poolBookingRoutes);
 app.use('/api/housekeeping', housekeepingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/receptionist', receptionistRoutes);
@@ -106,7 +107,7 @@ app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/facilities', facilitiesRoutes);
 app.use('/api/activities', activitiesRoutes);
-app.use('/api/bookings', poolBookingRoutes);
+app.use('/api/bookings', bookingRoutes);
 
 // Error handling middleware
 app.use(notFound);

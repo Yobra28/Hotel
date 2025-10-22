@@ -131,8 +131,20 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  /* Ensure proper text size adjust across browsers */
+  html, :host {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
+}
+
+/* Safari user-select support for swiped toasts */
+[data-sonner-toast][data-swiped="true"] {
+  -webkit-user-select: none;
+  user-select: none;
 }

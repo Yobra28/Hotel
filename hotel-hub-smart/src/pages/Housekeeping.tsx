@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import housekeepingService from "@/services/housekeepingService";
 import roomService from "@/services/roomService";
+import adminService, { type StaffUserApi } from "@/services/adminService";
 
 type HKTask = {
   id: string;
@@ -31,23 +32,18 @@ type HKTask = {
 const Housekeeping = () => {
   const { user } = useAuth();
   
-  // Available housekeepers for task assignment
-  const housekeepers = [
-    "Mary Johnson",
-    "Peter Kamau", 
-    "Sarah Muthoni",
-    "John Ochieng",
-    "Grace Wanjiku"
-  ];
+  // Dynamic housekeepers loaded from backend
+  const [housekeepers, setHousekeepers] = useState<string[]>([]);
   const [tasks, setTasks] = useState<HKTask[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [backendTasks, backendRooms] = await Promise.all([
+        const [backendTasks, backendRooms, staff] = await Promise.all([
           user?.role === 'housekeeping' ? housekeepingService.myTasks() : housekeepingService.listTasks(),
           roomService.getTransformedRooms(),
+          adminService.getStaff({ role: 'housekeeping', isActive: true, limit: 200 }).catch(() => ({ items: [] as StaffUserApi[] }))
         ]);
         const t = (backendTasks || []).map((bt: any) => ({
           id: bt._id,
@@ -62,6 +58,8 @@ const Housekeeping = () => {
         }));
         setTasks(t);
         setRooms(backendRooms || []);
+        const names = (staff.items || []).map((s: StaffUserApi) => `${s.firstName} ${s.lastName}`);
+        setHousekeepers(names);
       } catch (e) {
         console.error('Failed to load housekeeping data', e);
         toast.error('Failed to load housekeeping data');
@@ -80,7 +78,6 @@ const Housekeeping = () => {
   const [formData, setFormData] = useState({
     roomId: "",
     assignedTo: "",
-    priority: "medium" as "low" | "medium" | "high",
     description: "",
   });
 
@@ -120,7 +117,6 @@ const Housekeeping = () => {
       const created = await housekeepingService.createTask({
         roomId: formData.roomId,
         assignedTo: formData.assignedTo,
-        priority: formData.priority,
         description: formData.description,
         taskType: 'cleaning',
       } as any);
@@ -155,7 +151,6 @@ const Housekeeping = () => {
       const updated = await housekeepingService.updateTask(selectedTask.id, {
         roomId: formData.roomId,
         assignedTo: formData.assignedTo,
-        priority: formData.priority,
         description: formData.description,
       } as any);
       setTasks(prev => prev.map(task => task.id === selectedTask.id ? {
@@ -194,7 +189,6 @@ const Housekeeping = () => {
     setFormData({
       roomId: "",
       assignedTo: "",
-      priority: "medium",
       description: "",
     });
   };
@@ -204,7 +198,6 @@ const Housekeeping = () => {
     setFormData({
       roomId: task.roomId,
       assignedTo: task.assignedTo,
-      priority: task.priority,
       description: task.description || "",
     });
     setIsEditDialogOpen(true);
@@ -219,7 +212,6 @@ const Housekeeping = () => {
     setFormData({
       roomId: roomId,
       assignedTo: "",
-      priority: "medium",
       description: "",
     });
     setIsAddDialogOpen(true);
@@ -305,19 +297,7 @@ const Housekeeping = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="priority">Priority</Label>
-                    <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value as any})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {/* Priority field removed as per request */}
                   <div className="space-y-2">
                     <Label htmlFor="description">Task Description</Label>
                     <Input 
@@ -540,19 +520,7 @@ const Housekeeping = () => {
                   </SelectContent>
                 </Select>
               </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-priority">Priority</Label>
-                  <Select value={formData.priority} onValueChange={(value) => setFormData({...formData, priority: value as any})}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              {/* Priority field removed from edit form */}
                 <div className="space-y-2">
                   <Label htmlFor="edit-description">Task Description</Label>
                   <Input 

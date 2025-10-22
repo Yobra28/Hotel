@@ -913,9 +913,9 @@ const GuestDashboard = () => {
                   </div>
               
               <div className="space-y-2">
-                <Label>Payment Method</Label>
+                <Label htmlFor="guestPaymentMethod">Payment Method</Label>
                 <Select value={paymentData.method} onValueChange={(value) => setPaymentData({...paymentData, method: value})}>
-                  <SelectTrigger>
+                  <SelectTrigger id="guestPaymentMethod">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
