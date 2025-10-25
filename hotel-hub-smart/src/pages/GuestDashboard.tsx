@@ -15,7 +15,7 @@ import { GuestLayout } from "@/components/GuestLayout";
 import GuestFoodOrdering from "@/components/GuestFoodOrdering";
 import GuestSwimmingActivities from "@/components/GuestSwimmingActivities";
 import GuestUpcomingActivities from "@/components/GuestUpcomingActivities";
-import { Calendar, DollarSign, CreditCard, Search, Bed, Star, Clock, CheckCircle, User, Phone, Mail, MapPin, LogOut, Bell, Download, MessageCircle, TrendingUp } from "lucide-react";
+import { Calendar, DollarSign, CreditCard, Search, Bed, Star, Clock, CheckCircle, User, Phone, Mail, MapPin, LogOut, Bell, Download, MessageCircle, TrendingUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import roomService from "@/services/roomService";
 import bookingService from "@/services/bookingService";
@@ -61,6 +61,11 @@ const GuestDashboard = () => {
   const [bookings, setBookings] = useState<GuestBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [roomsLoading, setRoomsLoading] = useState(false);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [roomsPerPage] = useState(6); // Number of rooms to display per page
+  const [viewMode, setViewMode] = useState<'section' | 'all'>('section'); // Toggle between section and all rooms
   
   // Load data on component mount
   useEffect(() => {
@@ -153,6 +158,30 @@ const GuestDashboard = () => {
     (selectedRoomType === 'all' || room.type === mapType(selectedRoomType)) &&
     room.number.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredRooms.length / roomsPerPage);
+  const startIndex = (currentPage - 1) * roomsPerPage;
+  const endIndex = startIndex + roomsPerPage;
+  const currentRooms = viewMode === 'section' ? filteredRooms.slice(startIndex, endIndex) : filteredRooms;
+  
+  // Reset to first page when filters change
+  const resetPagination = () => {
+    setCurrentPage(1);
+  };
+
+  // Handle page changes
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // Scroll to top of room section
+    document.getElementById('rooms-section')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Handle view mode toggle
+  const handleViewModeChange = (mode: 'section' | 'all') => {
+    setViewMode(mode);
+    setCurrentPage(1);
+  };
 
   const handleRoomBooking = async () => {
     if (!bookingData.checkIn || !bookingData.checkOut || !bookingData.guestName || !bookingData.guestEmail || !bookingData.guestPhone) {
@@ -303,15 +332,6 @@ const GuestDashboard = () => {
               Manage your bookings, payments, and reservations
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button 
-              onClick={() => setActiveTab("bookings")} 
-              variant="outline"
-            >
-              <Search className="h-4 w-4 mr-2" />
-              Browse Rooms
-            </Button>
-          </div>
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
 
@@ -420,15 +440,14 @@ const GuestDashboard = () => {
 
           {/* Bookings Tab */}
           <TabsContent value="bookings" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-2xl font-bold">Available Rooms</h2>
-                <p className="text-muted-foreground">Browse and book rooms for your stay</p>
-              </div>
-              <Button onClick={() => setActiveTab("bookings")}>
-                <Search className="h-4 w-4 mr-2" />
-                Browse Rooms
-              </Button>
+            <div>
+              <h2 className="text-2xl font-bold">Available Rooms</h2>
+              <p className="text-muted-foreground">
+                {viewMode === 'section' 
+                  ? `Showing ${currentRooms.length} of ${filteredRooms.length} rooms` 
+                  : `Showing all ${filteredRooms.length} rooms`
+                }
+              </p>
             </div>
             
             {/* Filters */}
@@ -438,11 +457,11 @@ const GuestDashboard = () => {
                 <Input
                   placeholder="Search rooms..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => { setSearchTerm(e.target.value); resetPagination(); }}
                   className="pl-10"
                 />
               </div>
-              <Select value={selectedRoomType} onValueChange={(v) => { setSelectedRoomType(v); }}>
+              <Select value={selectedRoomType} onValueChange={(v) => { setSelectedRoomType(v); resetPagination(); }}>
                 <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Room type" />
                 </SelectTrigger>
@@ -460,18 +479,42 @@ const GuestDashboard = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-sm">Check-in</Label>
-                <Input type="date" value={filterCheckIn} onChange={(e) => setFilterCheckIn(e.target.value)} />
+                <Input type="date" value={filterCheckIn} onChange={(e) => { setFilterCheckIn(e.target.value); resetPagination(); }} />
               </div>
               <div className="space-y-2">
                 <Label className="text-sm">Check-out</Label>
-                <Input type="date" value={filterCheckOut} onChange={(e) => setFilterCheckOut(e.target.value)} />
+                <Input type="date" value={filterCheckOut} onChange={(e) => { setFilterCheckOut(e.target.value); resetPagination(); }} />
               </div>
             </div>
-            <div>
-              <Button variant="outline" onClick={loadRooms} className="mt-2">Refresh Rooms</Button>
+            <div className="flex items-center justify-between">
+              <Button variant="outline" onClick={loadRooms}>Refresh Rooms</Button>
+              
+              {/* View Mode Toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">View:</span>
+                <div className="flex rounded-lg border">
+                  <Button
+                    variant={viewMode === 'section' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleViewModeChange('section')}
+                    className="rounded-r-none"
+                  >
+                    Sections ({roomsPerPage} per page)
+                  </Button>
+                  <Button
+                    variant={viewMode === 'all' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleViewModeChange('all')}
+                    className="rounded-l-none"
+                  >
+                    All Rooms ({filteredRooms.length})
+                  </Button>
+                </div>
+              </div>
             </div>
 
-            {/* Room Cards */}
+            {/* Room Cards Section */}
+            <div id="rooms-section">
             {roomsLoading ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -492,7 +535,7 @@ const GuestDashboard = () => {
               </div>
 ) : filteredRooms.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredRooms.map((room) => (
+                {currentRooms.map((room) => (
                 <Card key={room.id} className="hover:shadow-lg transition-all duration-300">
               <CardHeader>
                     <div className="flex items-start justify-between">
@@ -623,6 +666,92 @@ const GuestDashboard = () => {
                 </Button>
               </div>
             )}
+
+            {/* Pagination Controls */}
+            {viewMode === 'section' && filteredRooms.length > 0 && totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>
+                    Showing {startIndex + 1} to {Math.min(endIndex, filteredRooms.length)} of {filteredRooms.length} rooms
+                  </span>
+                </div>
+                
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="hidden sm:flex"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="sm:hidden"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  
+                  <div className="flex items-center gap-1 mx-2">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      // Show first page, last page, current page, and pages around current page
+                      const showPage = 
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1);
+                      
+                      if (!showPage && page === 2 && currentPage > 4) {
+                        return <span key={page} className="px-2 text-muted-foreground">...</span>;
+                      }
+                      
+                      if (!showPage && page === totalPages - 1 && currentPage < totalPages - 3) {
+                        return <span key={page} className="px-2 text-muted-foreground">...</span>;
+                      }
+                      
+                      if (!showPage) return null;
+                      
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => handlePageChange(page)}
+                          className="w-8 h-8 p-0"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="hidden sm:flex"
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="sm:hidden"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            </div>
 
           </TabsContent>
           
