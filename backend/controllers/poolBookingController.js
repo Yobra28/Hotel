@@ -1,5 +1,6 @@
 import PoolBooking from '../models/PoolBooking.js';
 import SwimmingActivity from '../models/SwimmingActivity.js';
+import Activity from '../models/Activity.js';
 import { asyncHandler, AppError, successResponse, getPaginationData } from '../middleware/errorHandler.js';
 
 // POST /api/bookings/pools
@@ -29,6 +30,13 @@ export const createPoolBooking = asyncHandler(async (req, res, next) => {
     totalAmount,
     paymentStatus: 'pending',
   });
+
+  // Auto-create activity entry
+  try {
+    await Activity.createFromPoolBooking(booking);
+  } catch (error) {
+    console.warn('Failed to create activity from pool booking:', error.message);
+  }
 
   successResponse(res, 201, 'Pool booking created successfully', { booking });
 });

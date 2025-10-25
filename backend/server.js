@@ -25,6 +25,7 @@ import menuRoutes from './routes/menuRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import facilitiesRoutes from './routes/facilitiesRoutes.js';
 import activitiesRoutes from './routes/activitiesRoutes.js';
+import activityRoutes from './routes/activityRoutes.js';
 import poolBookingRoutes from './routes/poolBookingRoutes.js';
 import Booking from './models/Booking.js';
 import Room from './models/Room.js';
@@ -107,6 +108,7 @@ app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/facilities', facilitiesRoutes);
 app.use('/api/activities', activitiesRoutes);
+app.use('/api/guest-activities', activityRoutes);
 app.use('/api/bookings', bookingRoutes);
 
 // Error handling middleware

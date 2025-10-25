@@ -15,6 +15,7 @@ import {
   Receipt,
   ChefHat,
   Waves,
+  Clock,
 } from "lucide-react";
 
 interface GuestLayoutProps {
@@ -35,6 +36,7 @@ export const GuestLayout = ({ children }: GuestLayoutProps) => {
     { name: "Overview", href: "/guest-dashboard", icon: LayoutDashboard, id: "overview" },
     { name: "Book Rooms", href: "/guest-dashboard", icon: Search, id: "bookings" },
     { name: "My Bookings", href: "/guest-dashboard", icon: Calendar, id: "mybookings" },
+    { name: "Upcoming Activities", href: "/guest-dashboard", icon: Clock, id: "upcoming-activities" },
     { name: "Food Ordering", href: "/guest-dashboard", icon: ChefHat, id: "food-ordering" },
     { name: "Swimming & Activities", href: "/guest-dashboard", icon: Waves, id: "swimming-activities" },
     { name: "Payments", href: "/guest-dashboard", icon: CreditCard, id: "payments" },
@@ -101,6 +103,15 @@ export const GuestLayout = ({ children }: GuestLayoutProps) => {
               >
                 <Search className="h-3 w-3 mr-2" />
                 Browse Rooms
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-xs"
+                onClick={() => window.dispatchEvent(new CustomEvent("changeGuestTab", { detail: { tab: "upcoming-activities" } }))}
+              >
+                <Clock className="h-3 w-3 mr-2" />
+                My Activities
               </Button>
               <Button
                 variant="ghost"

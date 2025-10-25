@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { GuestLayout } from "@/components/GuestLayout";
 import GuestFoodOrdering from "@/components/GuestFoodOrdering";
 import GuestSwimmingActivities from "@/components/GuestSwimmingActivities";
+import GuestUpcomingActivities from "@/components/GuestUpcomingActivities";
 import { Calendar, DollarSign, CreditCard, Search, Bed, Star, Clock, CheckCircle, User, Phone, Mail, MapPin, LogOut, Bell, Download, MessageCircle, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import roomService from "@/services/roomService";
@@ -882,6 +883,11 @@ const GuestDashboard = () => {
           {/* Food Ordering Tab */}
           <TabsContent value="food-ordering" className="space-y-6">
             <GuestFoodOrdering />
+          </TabsContent>
+
+          {/* Upcoming Activities Tab */}
+          <TabsContent value="upcoming-activities" className="space-y-6">
+            <GuestUpcomingActivities />
           </TabsContent>
 
           {/* Swimming Activities Tab */}

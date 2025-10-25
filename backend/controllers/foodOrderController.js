@@ -1,6 +1,7 @@
 import FoodOrder from '../models/FoodOrder.js';
 import MenuItem from '../models/MenuItem.js';
 import User from '../models/User.js';
+import Activity from '../models/Activity.js';
 import { asyncHandler, AppError, successResponse, getPaginationData } from '../middleware/errorHandler.js';
 
 // GET /api/orders/food (staff)
@@ -72,6 +73,15 @@ export const createFoodOrder = asyncHandler(async (req, res, next) => {
     specialInstructions,
     createdBy: req.user?._id,
   });
+
+  // Auto-create activity entry for dine-in orders or special delivery orders
+  if (orderType === 'dine-in' || (orderType === 'delivery' && deliveryLocation)) {
+    try {
+      await Activity.createFromFoodOrder(order);
+    } catch (error) {
+      console.warn('Failed to create activity from food order:', error.message);
+    }
+  }
 
   successResponse(res, 201, 'Food order created successfully', { order });
 });
